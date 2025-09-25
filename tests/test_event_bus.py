@@ -1,7 +1,7 @@
 import pytest
 import asyncio
-from event_bus import InProcessEventBus
-from logger import BulletproofLogger
+from app.shared.event_bus import InProcessEventBus
+from app.config.logger import BulletproofLogger
 
 logger = BulletproofLogger(name="TestEventBus")
 

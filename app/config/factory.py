@@ -1,6 +1,7 @@
-from app.shared.logger import BulletproofLogger
+from app.config.logger import BulletproofLogger, get_logger
 from app.shared.clients.redis_client import RedisClient
-from app.shared.clients import KafkaEventBus
+from app.shared.event_bus.kafka_bus import KafkaEventBus
+from app.shared.event_bus.redis_bus import RedisEventBus
 from app.config.settings import Settings
 
 settings = Settings()
@@ -29,8 +30,15 @@ def get_kafka_event_bus(logger: BulletproofLogger = None) -> KafkaEventBus:
     logger = logger or get_logger("kafka_event_bus")
     return KafkaEventBus(
         bootstrap_servers=settings.kafka_bootstrap_servers,
-        topic=settings.kafka_topic,
-        dlq_topic=settings.kafka_dlq_topic,
         group_id=settings.kafka_group_id,
+        dlq_topic=settings.kafka_dlq_topic,  # pass DLQ topic here
+        max_retries=5,
         logger=logger
     )
+
+# ----------------------------
+# Redis EventBus factory (optional)
+# ----------------------------
+def get_redis_event_bus(logger: BulletproofLogger = None) -> RedisEventBus:
+    logger = logger or get_logger("redis_event_bus")
+    return RedisEventBus(logger=logger)

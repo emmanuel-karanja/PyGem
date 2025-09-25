@@ -1,14 +1,11 @@
-import pytest
-import asyncio
 import json
-from app.shared.clients.redis_client import RedisClient
-from logger import BulletproofLogger
+import pytest
+from app.shared.clients import RedisClient
+from app.config.logger import logger
 
-logger = BulletproofLogger(name="TestRedisLogger")
-
-# ----------------------------
+# -----------------------------
 # Dummy Redis backend
-# ----------------------------
+# -----------------------------
 class DummyRedis:
     def __init__(self):
         self.store = {}
@@ -20,17 +17,18 @@ class DummyRedis:
         return self.store.get(key)
 
     async def delete(self, key):
-        return 1 if key in self.store else 0
+        return self.store.pop(key, None) is not None
 
     async def exists(self, key):
-        return 1 if key in self.store else 0
+        return key in self.store
+
+    async def ping(self):
+        return True
 
     async def close(self):
         pass
 
-# ----------------------------
-# Test RedisClient
-# ----------------------------
+
 @pytest.mark.asyncio
 async def test_redis_set_get_delete(monkeypatch):
     client = RedisClient(logger=logger)
@@ -38,13 +36,12 @@ async def test_redis_set_get_delete(monkeypatch):
 
     # Test set
     await client.set("key1", {"foo": "bar"}, ttl=60)
-    # Verify internal store directly (JSON string)
     stored_value = client.redis.store.get("key1")
     assert stored_value == json.dumps({"foo": "bar"})
 
     # Test get
     value = await client.get("key1")
-    assert value == {"foo": "bar"}  # JSON is deserialized correctly
+    assert value == {"foo": "bar"}  # JSON is deserialized
 
     # Test exists
     exists = await client.exists("key1")
@@ -56,4 +53,4 @@ async def test_redis_set_get_delete(monkeypatch):
 
     # Test get after delete
     value_after_delete = await client.get("key1")
-    assert value_after_delete is None
+    assert value_after_delete is None  # ✅ now passes

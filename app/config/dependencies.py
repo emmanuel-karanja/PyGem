@@ -1,7 +1,7 @@
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from session import get_sessionmaker
-from database import PostgresClient
+from app.config.db_session import get_sessionmaker
+from app.shared.database import PostgresClient
 from app.config.factory import get_logger, get_redis_client, get_kafka_event_bus
 from app.config.settings import Settings
 

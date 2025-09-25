@@ -6,13 +6,12 @@ from app.config.dependencies import (
     redis_client,
     event_bus,
     postgres_client,
-    async_sessionmaker,
 )
-from db.session import init_db
+from app.config.db_session import init_db, get_sessionmaker
 from app.config.settings import Settings
 
 settings = Settings()
-app = FastAPI(title="Modular Monolith FastAPI App")
+app = FastAPI(title=settings.app_name)
 
 # ----------------------------
 # Include Feature Routers
@@ -31,11 +30,12 @@ async def startup_event():
     await redis_client.connect()
     logger.info("✅ Redis connected")
 
-    # Kafka
+    # Kafka / EventBus
     await event_bus.start()
-    logger.info("✅ Kafka client started")
+    logger.info("✅ EventBus started")
 
-    # SQLAlchemy: import feature models and create tables
+    # SQLAlchemy async session and DB init
+    get_sessionmaker(settings.database_url, echo=settings.db_echo)
     await init_db(settings.database_url, app_path="app")
     logger.info("✅ SQLAlchemy DB initialized")
 
@@ -54,9 +54,9 @@ async def shutdown_event():
     await postgres_client.stop()
     logger.info("✅ HighThroughputPostgresClient stopped")
 
-    # Kafka
+    # Kafka / EventBus
     await event_bus.stop()
-    logger.info("✅ Kafka client stopped")
+    logger.info("✅ EventBus stopped")
 
     # Redis
     await redis_client.close()

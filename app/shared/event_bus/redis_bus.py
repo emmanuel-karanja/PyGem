@@ -1,75 +1,101 @@
-# my_event_system/event_bus/kafka_bus.py
 import asyncio
 import json
-from aiokafka import AIOKafkaProducer, AIOKafkaConsumer
-from typing import Callable, Dict, List
-from .base import EventBus
-from logging import Logger
+from typing import Callable, Dict, List, Optional
+from redis.asyncio import Redis
 
-class KafkaEventBus(EventBus):
+from app.shared.event_bus.base import EventBus
+from app.config.logger import get_logger, BulletproofLogger
+from app.shared.metrics.metrics_collector import MetricsCollector
+
+
+class RedisEventBus(EventBus):
+    """
+    Redis-based EventBus implementation using Redis PUB/SUB.
+    Supports async publishing/subscribing, retries, and structured logging.
+    """
+
     def __init__(
         self,
-        bootstrap_servers: str,
-        logger: Logger,
-        group_id: str = "eventbus-group",
-        max_retries: int = 5
+        redis_url: str = "redis://localhost:6379/0",
+        max_retries: int = 3,
+        logger: Optional[BulletproofLogger] = None,
     ):
-        self.bootstrap_servers = bootstrap_servers
-        self.logger = logger
-        self.group_id = group_id
+        self.redis_url = redis_url
         self.max_retries = max_retries
-
-        self.producer: AIOKafkaProducer | None = None
-        self.consumer: AIOKafkaConsumer | None = None
+        self.logger: BulletproofLogger = logger or get_logger("RedisEventBus")
+        self.redis: Optional[Redis] = None
         self.subscribers: Dict[str, List[Callable]] = {}
+        self._consume_tasks: Dict[str, asyncio.Task] = {}
+        self.metrics = MetricsCollector(self.logger)
 
-    async def start(self):
-        """Start Kafka producer"""
-        self.producer = AIOKafkaProducer(bootstrap_servers=self.bootstrap_servers)
-        await self.producer.start()
-        self.logger.info("KafkaEventBus producer started")
+    async def connect(self):
+        """Connect to Redis"""
+        if not self.redis:
+            self.redis = Redis.from_url(self.redis_url, decode_responses=True)
+            try:
+                await self.redis.ping()
+                self.logger.info("Connected to Redis", extra={"redis_url": self.redis_url})
+            except Exception as exc:
+                self.logger.error("Failed to connect to Redis", extra={"error": str(exc)})
+                raise
 
-    async def stop(self):
-        if self.consumer:
-            await self.consumer.stop()
-        if self.producer:
-            await self.producer.stop()
-        self.logger.info("KafkaEventBus stopped")
-
-    async def publish(self, event_name: str, payload: dict):
-        """Publish an event to Kafka"""
-        if not self.producer:
-            await self.start()
+    async def publish(self, channel: str, payload: dict):
+        """Publish a message to a Redis channel with retries"""
+        await self.connect()
+        data = json.dumps(payload)
         for attempt in range(1, self.max_retries + 1):
             try:
-                await self.producer.send_and_wait(
-                    topic=event_name,
-                    key=None,
-                    value=json.dumps(payload).encode()
-                )
-                self.logger.info("Event published", extra={"event": event_name, "payload": payload})
+                await self.redis.publish(channel, data)
+                self.logger.info("Published event to Redis", extra={"channel": channel, "payload": payload})
+                self.metrics.increment("published")
                 return
             except Exception as exc:
-                self.logger.warning(f"Publish attempt {attempt} failed", extra={"error": str(exc)})
+                self.logger.warning(
+                    f"Publish attempt {attempt} failed",
+                    extra={"channel": channel, "error": str(exc)}
+                )
                 await asyncio.sleep(0.5 * attempt)
-        self.logger.error("Failed to publish event after max retries", extra={"event": event_name, "payload": payload})
+        self.logger.error("Failed to publish after retries", extra={"channel": channel, "payload": payload})
+        self.metrics.increment("failed_publish")
 
-    async def subscribe(self, event_name: str, callback: Callable):
-        """Subscribe to a Kafka topic"""
-        self.consumer = AIOKafkaConsumer(
-            event_name,
-            bootstrap_servers=self.bootstrap_servers,
-            group_id=self.group_id,
-            auto_offset_reset="earliest"
-        )
-        await self.consumer.start()
-        self.subscribers.setdefault(event_name, []).append(callback)
-        self.logger.info("Subscribed to Kafka topic", extra={"topic": event_name})
+    async def subscribe(self, channel: str, callback: Callable):
+        """Subscribe to a Redis channel"""
+        await self.connect()
+        self.subscribers.setdefault(channel, []).append(callback)
 
         async def consume_loop():
-            async for msg in self.consumer:
-                payload = json.loads(msg.value.decode())
-                for cb in self.subscribers[event_name]:
-                    asyncio.create_task(cb(payload))
+            pubsub = self.redis.pubsub()
+            await pubsub.subscribe(channel)
+            self.logger.info("Subscribed to Redis channel", extra={"channel": channel})
+            try:
+                async for message in pubsub.listen():
+                    if message["type"] != "message":
+                        continue
+                    try:
+                        payload = json.loads(message["data"])
+                        for cb in self.subscribers.get(channel, []):
+                            asyncio.create_task(cb(payload))
+                        self.metrics.increment("consumed")
+                        self.logger.debug("Event consumed", extra={"channel": channel, "payload": payload})
+                    except Exception as exc:
+                        self.logger.exception("Failed to process message", extra={"channel": channel, "error": str(exc)})
+                        self.metrics.increment("failed_consume")
+            finally:
+                await pubsub.unsubscribe(channel)
+                await pubsub.close()
 
-        asyncio.create_task(consume_loop())
+        task = asyncio.create_task(consume_loop())
+        self._consume_tasks[channel] = task
+
+    async def stop(self):
+        """Stop all subscriptions and Redis connection"""
+        for channel, task in self._consume_tasks.items():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                self.logger.debug(f"Consume task for channel {channel} cancelled")
+
+        if self.redis:
+            await self.redis.close()
+            self.logger.info("Redis connection closed")

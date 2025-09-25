@@ -1,6 +1,11 @@
 # ----------------------------
 # Modular Monolith Setup Script
 # ----------------------------
+
+param (
+    [string]$Step = "all"
+)
+
 $ErrorActionPreference = "Stop"
 
 # ----------------------------
@@ -47,9 +52,8 @@ function Setup-Venv {
     }
 
     # Activate venv for current session
-    $activate = "$venvPath\Scripts\Activate.ps1"
     Write-Host "Activating virtual environment..."
-    & $activate
+    & "$venvPath\Scripts\Activate.ps1"
 }
 
 # ----------------------------
@@ -105,10 +109,6 @@ function Run-Project {
 # ----------------------------
 # 6️⃣ Menu / Execution
 # ----------------------------
-param (
-    [string]$Step = "all"
-)
-
 switch ($Step.ToLower()) {
     "venv"    { Setup-Venv }
     "deps"    { Setup-Venv; Install-Dependencies }
