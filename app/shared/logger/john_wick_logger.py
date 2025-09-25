@@ -4,14 +4,35 @@ from logging.handlers import RotatingFileHandler
 import json
 from typing import Any, Dict, Optional
 from colorama import init as colorama_init, Fore, Style
+import threading
+import queue
 
-colorama_init(autoreset=True)  # automatically reset colors after each print
+colorama_init(autoreset=True)
 
 # ----------------------------
-# Custom JSON Formatter
+# Queue for interactive log expansion
+# ----------------------------
+expand_queue = queue.Queue()
+
+def listen_for_expand():
+    if not sys.stdin or not sys.stdin.isatty():
+        # Skip in non-interactive environments (pytest, Docker, etc.)
+        return
+    while True:
+        _ = sys.stdin.readline()  # Wait for Enter
+        try:
+            record = expand_queue.get_nowait()
+            print("\n💡 Expanded log extra:")
+            print(json.dumps(record, indent=2))
+        except queue.Empty:
+            continue
+
+threading.Thread(target=listen_for_expand, daemon=True).start()
+
+# ----------------------------
+# JSON Formatter
 # ----------------------------
 class JsonFormatter(logging.Formatter):
-    """Formatter that outputs logs in structured JSON format"""
     def format(self, record: logging.LogRecord) -> str:
         log_record: Dict[str, Any] = {
             "timestamp": self.formatTime(record, "%Y-%m-%dT%H:%M:%S"),
@@ -23,6 +44,8 @@ class JsonFormatter(logging.Formatter):
             log_record["exception"] = self.formatException(record.exc_info)
         if hasattr(record, "extra") and record.extra:
             log_record["extra"] = record.extra
+            # Push extra to interactive queue
+            expand_queue.put(record.extra)
         return json.dumps(log_record)
 
 # ----------------------------
@@ -45,9 +68,9 @@ class ColoredFormatter(logging.Formatter):
         return f"{color}{msg}{Style.RESET_ALL}"
 
 # ----------------------------
-# BulletproofLogger
+# JohnWickLogger
 # ----------------------------
-class BulletproofLogger(logging.Logger):
+class JohnWickLogger(logging.Logger):
     def __init__(
         self,
         name: str,
@@ -58,17 +81,17 @@ class BulletproofLogger(logging.Logger):
         json_format: bool = True
     ):
         super().__init__(name, level=level)
-        self.propagate = False  # prevent double logging
+        self.propagate = False
 
         if not self.handlers:
-            # Console handler with colors
+            # Console handler
             console_handler = logging.StreamHandler(sys.stdout)
             console_handler.setLevel(level)
             console_handler.setFormatter(
                 ColoredFormatter() if not json_format else JsonFormatter()
             )
 
-            # Rotating file handler (always JSON)
+            # Rotating file handler
             file_handler = RotatingFileHandler(log_file, maxBytes=max_bytes, backupCount=backup_count)
             file_handler.setLevel(level)
             file_handler.setFormatter(JsonFormatter())
@@ -76,7 +99,7 @@ class BulletproofLogger(logging.Logger):
             self.addHandler(console_handler)
             self.addHandler(file_handler)
 
-    # Override convenience methods to support extra metadata
+    # Convenience methods supporting extra metadata
     def debug(self, msg: str, extra: Optional[Dict[str, Any]] = None, *args, **kwargs):
         super().debug(msg, extra={"extra": extra} if extra else None, *args, **kwargs)
 

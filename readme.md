@@ -38,7 +38,7 @@ Cobbled together from best practices and **extra-spiced with GenAI** for those c
   - Retryable callbacks ✅  
 
 - **Logging & Metrics**
-  - `BulletproofLogger` for structured logs ✅  
+  - `JohnWickLogger` for structured logs ✅  
   - Metrics collection for DB, Redis, and events ✅  
 
 - **FastAPI Lifecycle Ready**
@@ -162,7 +162,7 @@ rows = await pg.fetch("SELECT * FROM users")
 ## 📊 Metrics & Logging
 - All DB, Redis, and EventBus operations are tracked with **MetricsCollector**.
 - Logs are structured and saved to `logs/app.log`.
-- Global logger: `BulletproofLogger` for unified logging.
+- Global logger: `JohnWickLogger` for unified logging.
 
 ---
 
@@ -186,4 +186,95 @@ async def test_redis_set_get_delete():
 ## 🎯 Why This Template?
 - Saves hours of setup ✅  
 - Implements production-grade async patterns ✅  
+- If not for anything the JohnWickLogger is pretty dope!
 - Modular & scalable for microservices l
+
+# JohnWickLogger Documentation
+
+## Logging with JohnWickLogger
+
+`JohnWickLogger` is a custom logger for this project that provides:
+
+- JSON logs for file handlers
+- Colorized logs for console output
+- Support for `extra` metadata for structured logging
+
+---
+
+## Initialization
+
+```python
+from app.shared.logger.john_wick_logger import JohnWickLogger
+
+logger = JohnWickLogger(
+    name="app_logger",
+    log_file="app.log",
+    json_format=True  # Use JSON for console, too
+)
+```
+
+---
+
+## Logging Methods
+
+`JohnWickLogger` keeps the standard logging interface:
+
+```python
+logger.debug("Debug message", extra={"class_name": "MyClass"})
+logger.info("Info message", extra={"user_id": 42})
+logger.warning("Warning message")
+logger.error("Error message")
+logger.exception("Exception message")
+```
+
+- All methods accept an optional `extra` dictionary for structured metadata.
+- `class_name`, `module_name`, or request-specific identifiers can be included.
+
+---
+
+## Example: Adding Extras
+
+```python
+class FeatureService:
+    def __init__(self):
+        self.logger = logger
+
+    def process(self, user_id: int):
+        self.logger.info(
+            "Processing user request",
+            extra={"class_name": self.__class__.__name__, "user_id": user_id}
+        )
+
+service = FeatureService()
+service.process(user_id=42)
+```
+
+**File output (JSON):**
+
+```json
+{
+  "timestamp": "2025-09-25T12:30:01",
+  "level": "INFO",
+  "name": "app_logger",
+  "message": "Processing user request",
+  "extra": {
+    "class_name": "FeatureService",
+    "user_id": 42
+  }
+}
+```
+
+**Console output (colorized):**
+
+```
+2025-09-25 12:30:01 - app_logger - INFO - Processing user request
+```
+
+---
+
+## Best Practices
+
+- Always include `class_name` or `module_name` in `extra` for traceability. NB: We could have added automation for this,but
+  it'd require walking the stack which adds some overhead, improves to come soon.
+- Include request or user identifiers for distributed tracing.
+- Avoid logging sensitive information like passwords or secr

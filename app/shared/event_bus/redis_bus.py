@@ -4,7 +4,7 @@ from typing import Callable, Dict, List, Optional
 from redis.asyncio import Redis
 
 from app.shared.event_bus.base import EventBus
-from app.config.logger import get_logger, BulletproofLogger
+from app.config.logger import get_logger, JohnWickLogger
 from app.shared.metrics.metrics_collector import MetricsCollector
 
 
@@ -18,11 +18,11 @@ class RedisEventBus(EventBus):
         self,
         redis_url: str = "redis://localhost:6379/0",
         max_retries: int = 3,
-        logger: Optional[BulletproofLogger] = None,
+        logger: Optional[JohnWickLogger] = None,
     ):
         self.redis_url = redis_url
         self.max_retries = max_retries
-        self.logger: BulletproofLogger = logger or get_logger("RedisEventBus")
+        self.logger: JohnWickLogger = logger or get_logger("RedisEventBus")
         self.redis: Optional[Redis] = None
         self.subscribers: Dict[str, List[Callable]] = {}
         self._consume_tasks: Dict[str, asyncio.Task] = {}

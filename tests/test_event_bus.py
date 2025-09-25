@@ -1,9 +1,9 @@
 import pytest
 import asyncio
 from app.shared.event_bus import InProcessEventBus
-from app.config.logger import BulletproofLogger
+from app.config.logger import JohnWickLogger
 
-logger = BulletproofLogger(name="TestEventBus")
+logger = JohnWickLogger(name="TestEventBus")
 
 @pytest.mark.asyncio
 async def test_eventbus_publish_subscribe():

@@ -7,7 +7,7 @@ from typing import Callable, Any, List, Optional, Tuple
 
 from app.shared.database.base import DatabaseClient
 from app.shared.retry.base import RetryPolicy
-from app.config.logger import get_logger, BulletproofLogger
+from app.config.logger import get_logger, JohnWickLogger
 from app.shared.metrics.metrics_collector import MetricsCollector
 
 
@@ -20,7 +20,7 @@ class PostgresClient(DatabaseClient):
     def __init__(
         self,
         dsn: str,
-        logger: Optional[BulletproofLogger] = None,
+        logger: get_logger() or Optional[JohnWickLogger] = None,
         retry_policy: Optional[RetryPolicy] = None,
         max_concurrency: int = 5,
         batch_size: int = 50,

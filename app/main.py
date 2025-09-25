@@ -11,11 +11,23 @@ from app.config.dependencies import (
 )
 from app.config.settings import Settings
 from app.config.db_session import init_db
+import asyncio
 
 settings = Settings()
 
-# Apparently startup events  i.e. 
-# starting FastAPI 0.101+, the @app.on_event("startup") and @app.on_event("shutdown") decorators are deprecated.
+async def wait_with_retry(name: str, coro_func, retries: int = 10, delay: int = 2):
+    """Utility to attempt async startup with progress logs"""
+    for i in range(1, retries + 1):
+        try:
+            await coro_func()
+            logger.info(f"✅ {name} ready")
+            return
+        except Exception as e:
+            logger.warning(f"[{i}/{retries}] {name} not ready: {e}")
+            await asyncio.sleep(delay)
+    raise RuntimeError(f"❌ {name} failed to start after {retries} retries")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # ----------------------------
@@ -24,23 +36,19 @@ async def lifespan(app: FastAPI):
     logger.info("🚀 Starting application...")
 
     # Redis
-    await redis_client.connect()
-    logger.info("✅ Redis connected")
-
+    await wait_with_retry("Redis", redis_client.connect)
+    
     # Kafka
-    await event_bus.start()
-    logger.info("✅ Kafka client started")
+    await wait_with_retry("Kafka client", event_bus.start)
 
-    # SQLAlchemy: import feature models and create tables
+    # SQLAlchemy
     await init_db(str(settings.database_url), app_path="app")
     logger.info("✅ SQLAlchemy DB initialized")
 
     # HighThroughputPostgresClient
-    await postgres_client.start()
-    logger.info("✅ HighThroughputPostgresClient started")
+    await wait_with_retry("HighThroughputPostgresClient", postgres_client.start)
 
     logger.info("🎉 Application startup complete")
-
     yield  # Hand control back to FastAPI; the app is running
 
     # ----------------------------
@@ -48,15 +56,12 @@ async def lifespan(app: FastAPI):
     # ----------------------------
     logger.info("⚠️ Shutting down application...")
 
-    # HighThroughputPostgresClient
     await postgres_client.stop()
     logger.info("✅ HighThroughputPostgresClient stopped")
 
-    # Kafka
     await event_bus.stop()
     logger.info("✅ Kafka client stopped")
 
-    # Redis
     await redis_client.close()
     logger.info("✅ Redis disconnected")
 

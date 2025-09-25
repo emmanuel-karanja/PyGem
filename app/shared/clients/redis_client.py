@@ -2,7 +2,7 @@ import asyncio
 import json
 from typing import Any, Optional
 from redis.asyncio import Redis
-from app.config.logger import logger, BulletproofLogger
+from app.config.logger import logger, JohnWickLogger,get_logger
 from app.shared.metrics.metrics_collector import MetricsCollector
 from app.shared.metrics.metrics_schema import RedisMetrics
 
@@ -14,7 +14,7 @@ class RedisClient:
     - Retries with backoff
     - TTL support
     - JSON serialization
-    - Fully integrated with injected BulletproofLogger and metrics
+    - Fully integrated with injected JohnWickLogger and metrics
     """
 
     def __init__(
@@ -22,12 +22,12 @@ class RedisClient:
         redis_url: str = "redis://localhost:6379/0",
         max_retries: int = 5,
         retry_backoff: float = 1.0,
-        logger: Optional[BulletproofLogger] = None,
+        logger: Optional[JohnWickLogger] = None,
     ):
         self.redis_url = redis_url
         self.max_retries = max_retries
         self.retry_backoff = retry_backoff
-        self.logger: BulletproofLogger = logger or BulletproofLogger("RedisClient")
+        self.logger: JohnWickLogger = get_logger() or logger or JohnWickLogger("RedisClient")
         self.redis: Optional[Redis] = None
         self.metrics = MetricsCollector(self.logger)
 

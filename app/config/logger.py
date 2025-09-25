@@ -2,7 +2,7 @@
 
 import os
 from logging import Logger
-from app.shared.logger.bulletproof_logger import BulletproofLogger
+from app.shared.logger.john_wick_logger import JohnWickLogger
 from app.config.settings import Settings
 
 settings = Settings()
@@ -17,13 +17,13 @@ _logger: Logger | None = None
 
 def get_logger() -> Logger:
     """
-    Return a global BulletproofLogger instance.
+    Return a global JohnWickLogger instance.
     Creates it on first call (singleton pattern).
     Loads app_name and log_file from settings.
     """
     global _logger
     if _logger is None:
-        _logger = BulletproofLogger(
+        _logger = JohnWickLogger(
             name=settings.app_name,
             log_file=settings.log_file,
             level=settings.log_level
@@ -32,4 +32,4 @@ def get_logger() -> Logger:
 
 # Expose both convenience and full control
 logger: Logger = get_logger()
-BulletproofLogger = BulletproofLogger  # re-export for direct access
+JohnWickLogger = JohnWickLogger  # re-export for direct access

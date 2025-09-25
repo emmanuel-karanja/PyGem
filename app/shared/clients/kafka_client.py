@@ -5,9 +5,9 @@ from typing import Callable, Any, Optional
 from aiokafka import AIOKafkaProducer, AIOKafkaConsumer
 
 from app.shared.retry.exponential_backoff_retry import ExponentialBackoffRetry
-from app.config.logger import BulletproofLogger, get_logger
+from app.config.logger import JohnWickLogger, get_logger
 from app.shared.metrics.metrics_collector import MetricsCollector
-from app.shared.metrics.metrics_schema import KafkaMetrics  # ⬅️ import schema
+from app.shared.metrics.metrics_schema import KafkaMetrics  # ⬅ import schema
 
 
 class KafkaClient:
@@ -26,7 +26,7 @@ class KafkaClient:
         topic: str,
         dlq_topic: str,
         group_id: str,
-        logger: Optional[BulletproofLogger] = None,
+        logger: Optional[JohnWickLogger] = None,
         retry_policy: Optional[ExponentialBackoffRetry] = None,
         max_concurrency: int = 5,
         batch_size: int = 10,
@@ -36,7 +36,7 @@ class KafkaClient:
         self.dlq_topic = dlq_topic
         self.group_id = group_id
 
-        self.logger: BulletproofLogger = logger or get_logger("KafkaClient")
+        self.logger: JohnWickLogger = get_logger() or logger or get_logger("KafkaClient")
         self.retry_policy = retry_policy or ExponentialBackoffRetry()
         self.batch_size = batch_size
         self.semaphore = asyncio.Semaphore(max_concurrency)

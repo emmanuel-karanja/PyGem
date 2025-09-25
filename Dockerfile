@@ -30,15 +30,20 @@ RUN apt-get update && \
     && rm -rf /var/lib/apt/lists/*
 
 # ----------------------------
-# Copy project files
+# Copy only dependency files first (for caching)
 # ----------------------------
-COPY . $APP_HOME
+COPY requirements.txt $APP_HOME/
 
 # ----------------------------
 # Install Python dependencies
 # ----------------------------
-RUN python -m pip install --upgrade pip setuptools wheel
-RUN pip install --no-cache-dir -r requirements.txt
+RUN python -m pip install --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir -r requirements.txt
+
+# ----------------------------
+# Copy the rest of the project
+# ----------------------------
+COPY . $APP_HOME
 
 # ----------------------------
 # Create logs directory
@@ -50,14 +55,4 @@ RUN mkdir -p $APP_HOME/logs
 # ----------------------------
 EXPOSE 8000
 
-# ----------------------------
-# Entrypoint script for readiness check (optional)
-# ----------------------------
-COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
-
-# ----------------------------
-# Command
-# ----------------------------
-ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

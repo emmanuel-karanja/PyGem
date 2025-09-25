@@ -6,7 +6,7 @@ from typing import Optional
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncEngine, AsyncSession
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-from app.config.logger import BulletproofLogger,get_logger
+from app.config.logger import JohnWickLogger,get_logger
 
 logger=get_logger()
 # ----------------------------
@@ -68,7 +68,7 @@ def get_sessionmaker(database_url: str, echo: bool = False) -> sessionmaker[Asyn
 def import_models_from_features(app_path: str = "app"):
     """
     Scan each feature directory and import all models to register them with Base.
-    Logs every import success or failure using BulletproofLogger.
+    Logs every import success or failure using JohnWickLogger.
     """
     logger.info(f"Scanning '{app_path}' for feature models...")
     for feature_name in os.listdir(app_path):
@@ -91,7 +91,7 @@ def import_models_from_features(app_path: str = "app"):
 async def init_db(database_url: str, app_path: str = "app"):
     """
     Initialize DB: dynamically import all feature models and create tables.
-    Fully logged with BulletproofLogger.
+    Fully logged with JohnWickLogger.
     """
     logger.info("🚀 Starting database initialization...")
     import_models_from_features(app_path)

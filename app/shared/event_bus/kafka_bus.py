@@ -2,7 +2,7 @@ import asyncio
 import json
 from typing import Callable, Dict, List, Optional
 from aiokafka import AIOKafkaProducer, AIOKafkaConsumer
-from app.config.logger import BulletproofLogger, get_logger
+from app.config.logger import JohnWickLogger, get_logger
 from app.shared.metrics.metrics_collector import MetricsCollector
 
 
@@ -22,13 +22,13 @@ class KafkaEventBus:
         group_id: str = "eventbus-group",
         dlq_topic: Optional[str] = None,
         max_retries: int = 5,
-        logger: Optional[BulletproofLogger] = None,
+        logger: Optional[JohnWickLogger] = None,
     ):
         self.bootstrap_servers = bootstrap_servers
         self.group_id = group_id
         self.dlq_topic = dlq_topic
         self.max_retries = max_retries
-        self.logger: BulletproofLogger = logger or get_logger("KafkaEventBus")
+        self.logger: JohnWickLogger = logger or get_logger("KafkaEventBus")
 
         self.producer: Optional[AIOKafkaProducer] = None
         self.consumer: Optional[AIOKafkaConsumer] = None
