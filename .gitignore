@@ -1,0 +1,73 @@
+# ----------------------------
+# Python
+# ----------------------------
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyi
+*.env
+*.venv
+venv/
+env/
+ENV/
+
+# ----------------------------
+# Virtual Environment
+# ----------------------------
+.venv/
+venv/
+env/
+ENV/
+
+# ----------------------------
+# Distribution / Packaging
+# ----------------------------
+build/
+dist/
+*.egg-info/
+*.egg
+
+# ----------------------------
+# Logs
+# ----------------------------
+*.log
+*.out
+*.err
+logs/
+app.log
+
+# ----------------------------
+# Pytest / Testing
+# ----------------------------
+.pytest_cache/
+.coverage
+*.cover
+htmlcov/
+test_results/
+
+# ----------------------------
+# IDEs / Editors
+# ----------------------------
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+*.code-workspace
+
+# ----------------------------
+# Docker
+# ----------------------------
+*.env
+docker-compose.override.yml
+*.docker
+docker-compose.override.*.yml
+**/docker-compose.override.yml
+
+# ----------------------------
+# OS / Misc
+# ----------------------------
+.DS_Store
+Thumbs.db
+*.swp
+*.bak

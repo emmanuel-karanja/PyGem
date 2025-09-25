@@ -1,0 +1,57 @@
+[tool.poetry]
+name = "modular_monolith"
+version = "0.1.0"
+description = "A modular monolith Python project with feature-based architecture"
+authors = ["Your Name <you@example.com>"]
+readme = "README.md"
+packages = [
+    { include = "app" },
+    { include = "app/shared/logger" },
+    { include = "app/shared/retry" },
+    { include = "app/shared/clients" },
+    { include = "app/shared/event_bus" },
+    { include = "app/feature1" },
+    { include = "app/feature2" }
+]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+fastapi = "^0.104"
+uvicorn = "^0.25"
+aiokafka = "^0.8.0"
+aioredis = "^2.0.1"
+pydantic = "^2.5"
+structlog = "^23.6"
+
+[tool.poetry.dev-dependencies]
+pytest = "^8.2"
+pytest-asyncio = "^0.21"
+mypy = "^1.6"
+black = "^24.3"
+isort = "^6.12"
+flake8 = "^7.0"
+
+[build-system]
+requires = ["poetry-core>=1.6.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 88
+target-version = ['py312']
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.venv
+  | build
+  | dist
+  | .pytest_cache
+)/
+'''
+
+[tool.isort]
+profile = "black"
+
+[tool.mypy]
+python_version = 3.12
+ignore_missing_imports = true
+strict = true
