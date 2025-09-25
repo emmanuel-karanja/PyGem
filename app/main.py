@@ -1,6 +1,12 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
-from app.config.dependencies import redis_client, redis_event_bus, postgres_client, async_sessionmaker,kafka_client,redis_event_bus
+from app.config.dependencies import (
+    get_redis_client,
+    get_redis_event_bus,
+    get_postgres_client,
+    get_kafka_client,
+    get_kafka_event_bus,
+)
 from app.config.settings import Settings
 from app.config.db_session import init_db
 from app.config.logger import logger
@@ -10,16 +16,21 @@ import uuid
 
 settings = Settings()
 
-async def wait_with_retry(name: str, coro_func, retries: int = 10, delay: int = 2):
-    for i in range(1, retries + 1):
-        try:
-            await coro_func()
-            logger.info(f"✅ {name} ready")
-            return
-        except Exception as e:
-            logger.warning(f"[{i}/{retries}] {name} not ready: {e}")
-            await asyncio.sleep(delay)
-    raise RuntimeError(f"❌ {name} failed to start after {retries} retries")
+
+async def wait_with_retry(name: str, coro_func, retry_policy, *args, **kwargs):
+    """
+    Wait for a service to be ready using a RetryPolicy.
+    """
+    async def _attempt():
+        await coro_func(*args, **kwargs)
+
+    try:
+        await retry_policy.execute(_attempt)
+        logger.info(f"✅ {name} ready")
+    except Exception as e:
+        logger.error(f"❌ {name} failed to start: {e}")
+        raise
+
 
 async def test_event_bus(bus, test_event: str, payload: dict):
     """
@@ -44,47 +55,52 @@ async def test_event_bus(bus, test_event: str, payload: dict):
     except asyncio.TimeoutError:
         logger.error(f"❌ Event bus '{bus.__class__.__name__}' test failed: message not received")
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("🚀 Starting application...")
 
-    # Wait for Redis to be ready
-    await wait_with_retry("Redis client", redis_client.connect)
-   
-    #Wait for Redis event bus
-    await wait_with_retry("Redis event bus",redis_event_bus.start)
+    # Initialize clients and buses from factories
+    redis_client = get_redis_client()
+    redis_event_bus = get_redis_event_bus()
+    postgres_client = get_postgres_client()
+    kafka_client = get_kafka_client()
+    kafka_event_bus = get_kafka_event_bus()
 
-   # Wait for Kafka client
-   # await wait_with_retry("Kafka client", kafka_client.start)
-    # Wait for Kafka event bus
-  #  await wait_with_retry("Kafka event bus", event_bus.start)
-
-    # Init DB
+    # ----------------------------
+    # Wait for services with retries
+    # ----------------------------
+    await wait_with_retry("Redis client", redis_client.connect, redis_client.retry_policy)
+    await wait_with_retry("Redis event bus", redis_event_bus.start, redis_event_bus.retry_policy)
+    await wait_with_retry("Kafka client", kafka_client.start, kafka_client.retry_policy)
+    await wait_with_retry("Kafka event bus", kafka_event_bus.start, kafka_event_bus.retry_policy)
     await init_db(str(settings.database_url), app_path="app")
     logger.info("✅ SQLAlchemy DB initialized")
-
-    # Wait for HighThroughputPostgresClient
-    await wait_with_retry("PostgresClient", postgres_client.start)
+    await wait_with_retry("PostgresClient", postgres_client.start, postgres_client.retry_policy)
 
     # ----------------------------
     # Event Bus tests
     # ----------------------------
     test_payload = {"id": str(uuid.uuid4()), "message": "test"}
     await test_event_bus(redis_event_bus, "feature_events", test_payload)
-    # If you have a Redis event bus, you can also test similarly:
-    # await test_event_bus(redis_event_bus, "redis_test_event", test_payload)
+    await test_event_bus(kafka_event_bus, "feature_events", test_payload)
 
     logger.info("🎉 Application startup complete")
     yield
 
+    # ----------------------------
     # Shutdown
+    # ----------------------------
     logger.info("⚠️ Shutting down application...")
     await postgres_client.stop()
-    await event_bus.stop()
+    await kafka_event_bus.stop()
+    await redis_event_bus.stop()
+    await kafka_client.stop()
     await redis_client.close()
     logger.info("🎯 Application shutdown complete")
 
-# Create app
+
+# Create FastAPI app
 app = FastAPI(title="Modular Monolith FastAPI App", lifespan=lifespan)
 app.include_router(health_router)
 logger.info("✅ Health routes initialized")
