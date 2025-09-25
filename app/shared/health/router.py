@@ -35,9 +35,3 @@ async def check_kafka():
     result = await health_checker.check_kafka()
     return {"kafka": result}
 
-# ----------------------------
-# Integrate into main app
-# ----------------------------
-def init_health_routes(app: FastAPI):
-    app.include_router(health_router)
-    logger.info("✅ Health routes initialized")

@@ -94,7 +94,7 @@ async def init_db(database_url: str, app_path: str = "app"):
     Fully logged with JohnWickLogger.
     """
     logger.info("🚀 Starting database initialization...")
-    import_models_from_features(app_path)
+    # import_models_from_features(app_path)
     engine = get_engine(database_url)
     try:
         async with engine.begin() as conn:

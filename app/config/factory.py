@@ -21,6 +21,7 @@ def get_logger(name: str = "app") -> JohnWickLogger:
 # ----------------------------
 def get_redis_client(logger: JohnWickLogger = None) -> RedisClient:
     logger = logger or get_logger("redis_client")
+    get_logger().info(settings.redis_url)
     return RedisClient(redis_url=settings.redis_url, logger=logger)
 
 # ----------------------------

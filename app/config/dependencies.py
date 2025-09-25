@@ -12,7 +12,10 @@ settings = Settings()
 logger = get_logger()
 redis_client = get_redis_client(logger)
 event_bus = get_kafka_event_bus(logger)
-postgres_client = PostgresClient(dsn=settings.database_url, logger=logger)
+
+# Instead of database_url due sqlalchemy issue
+pg_dsn = f"postgresql://{settings.db_user}:{settings.db_password}@{settings.db_host}:{settings.db_port}/{settings.db_name}"
+postgres_client = PostgresClient(dsn=pg_dsn, logger=logger)
 
 # SQLAlchemy AsyncSession factory
 async_sessionmaker = get_sessionmaker(settings.database_url)

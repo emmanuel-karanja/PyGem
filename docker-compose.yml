@@ -1,11 +1,14 @@
-version: '3.9'
 
 services:
+  # ----------------------------
+  # Redis
+  # ----------------------------
   redis:
     image: redis:7
     container_name: pygem_redis
     ports:
       - "6379:6379"
+    command: ["redis-server", "--bind", "0.0.0.0"]
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -13,6 +16,9 @@ services:
       retries: 10
       start_period: 5s
 
+  # ----------------------------
+  # Zookeeper
+  # ----------------------------
   zookeeper:
     image: confluentinc/cp-zookeeper:7.4.0
     container_name: pygem_zookeeper
@@ -28,6 +34,9 @@ services:
       retries: 10
       start_period: 5s
 
+  # ----------------------------
+  # Kafka
+  # ----------------------------
   kafka:
     image: confluentinc/cp-kafka:7.4.0
     container_name: pygem_kafka
@@ -51,6 +60,9 @@ services:
       retries: 12
       start_period: 10s
 
+  # ----------------------------
+  # Postgres
+  # ----------------------------
   postgres:
     image: postgres:16
     container_name: pygem_postgres
@@ -69,6 +81,9 @@ services:
       retries: 10
       start_period: 5s
 
+  # ----------------------------
+  # Application
+  # ----------------------------
   app:
     build: .
     container_name: pygem_app
@@ -93,5 +108,8 @@ services:
       - "8000:8000"
     restart: unless-stopped
 
+# ----------------------------
+# Volumes
+# ----------------------------
 volumes:
   pgdata:

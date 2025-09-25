@@ -5,6 +5,7 @@ from redis.asyncio import Redis
 from app.config.logger import logger, JohnWickLogger,get_logger
 from app.shared.metrics.metrics_collector import MetricsCollector
 from app.shared.metrics.metrics_schema import RedisMetrics
+from app.config.settings import Settings
 
 
 class RedisClient:
@@ -19,7 +20,7 @@ class RedisClient:
 
     def __init__(
         self,
-        redis_url: str = "redis://localhost:6379/0",
+        redis_url: str = Settings.redis_url,
         max_retries: int = 5,
         retry_backoff: float = 1.0,
         logger: Optional[JohnWickLogger] = None,

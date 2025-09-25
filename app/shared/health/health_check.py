@@ -5,8 +5,8 @@ from datetime import datetime
 import socket
 
 from app.shared.logger import JohnWickLogger
-from app.config.dependencies import redis_client, event_bus, postgres_client
-import redis.asyncio as redis
+from app.config.dependencies import event_bus, postgres_client
+import redis.asyncio as aioredis
 import asyncpg
 
 # ----------------------------
@@ -24,21 +24,27 @@ class HealthChecker:
         self.retries = retries
         self.retry_delay = retry_delay
 
-    async def check_redis(self) -> Dict[str, Any]:
-        """Check Redis health"""
+    async def check_redis(self, host: str = "127.0.0.1", port: int = 6379) -> Dict[str, Any]:
+        """Direct Redis health check without using redis_client"""
         for attempt in range(1, self.retries + 1):
             try:
                 self.logger.info(f"Checking Redis (attempt {attempt})...")
-                r = redis.Redis(host=redis_client.host, port=redis_client.port, decode_responses=True)
+                r = aioredis.Redis(host=host, port=port, decode_responses=True)
                 pong = await r.ping()
                 await r.close()
                 if pong:
                     self.logger.info("✅ Redis healthy")
                     return {"status": "healthy", "checked_at": datetime.utcnow().isoformat()}
             except Exception as e:
-                self.logger.warning("Redis check failed", extra={"attempt": attempt, "error": str(e)})
+                self.logger.warning(
+                    "Redis check failed", extra={"attempt": attempt, "error": str(e)}
+                )
                 await asyncio.sleep(self.retry_delay)
-        return {"status": "unhealthy", "error": "Cannot connect to Redis", "checked_at": datetime.utcnow().isoformat()}
+        return {
+            "status": "unhealthy",
+            "error": "Cannot connect to Redis",
+            "checked_at": datetime.utcnow().isoformat(),
+        }
 
     async def check_postgres(self) -> Dict[str, Any]:
         """Check PostgreSQL health"""
@@ -50,9 +56,15 @@ class HealthChecker:
                 self.logger.info("✅ Postgres healthy")
                 return {"status": "healthy", "checked_at": datetime.utcnow().isoformat()}
             except Exception as e:
-                self.logger.warning("Postgres check failed", extra={"attempt": attempt, "error": str(e)})
+                self.logger.warning(
+                    "Postgres check failed", extra={"attempt": attempt, "error": str(e)}
+                )
                 await asyncio.sleep(self.retry_delay)
-        return {"status": "unhealthy", "error": "Cannot connect to Postgres", "checked_at": datetime.utcnow().isoformat()}
+        return {
+            "status": "unhealthy",
+            "error": "Cannot connect to Postgres",
+            "checked_at": datetime.utcnow().isoformat(),
+        }
 
     async def check_kafka(self, host: str = "localhost", port: int = 9092) -> Dict[str, Any]:
         """Simple TCP check to Kafka broker"""
@@ -63,9 +75,15 @@ class HealthChecker:
                     self.logger.info("✅ Kafka healthy")
                     return {"status": "healthy", "checked_at": datetime.utcnow().isoformat()}
             except Exception as e:
-                self.logger.warning("Kafka check failed", extra={"attempt": attempt, "error": str(e)})
+                self.logger.warning(
+                    "Kafka check failed", extra={"attempt": attempt, "error": str(e)}
+                )
                 await asyncio.sleep(self.retry_delay)
-        return {"status": "unhealthy", "error": "Cannot connect to Kafka", "checked_at": datetime.utcnow().isoformat()}
+        return {
+            "status": "unhealthy",
+            "error": "Cannot connect to Kafka",
+            "checked_at": datetime.utcnow().isoformat(),
+        }
 
     async def run_all(self, services: Optional[List[str]] = None) -> Dict[str, Any]:
         """Run all health checks or a subset of services."""
@@ -93,4 +111,3 @@ class HealthChecker:
         results["summary"] = {"total": total, "healthy": healthy, "unhealthy": total - healthy}
 
         return results
-

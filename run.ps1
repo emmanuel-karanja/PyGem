@@ -1,5 +1,5 @@
 # ----------------------------
-# PyGem Run Script
+# PyGem Force-Rebuild Script
 # ----------------------------
 param (
     [string]$Step = "run"
@@ -12,27 +12,28 @@ $ErrorActionPreference = "Stop"
 # ----------------------------
 function Build-Image {
     $imageName = "pygem-modular-monolith:latest"
-    Write-Host "Building Docker image: $imageName..."
-    docker build -t $imageName .
+    Write-Host "🔨 Building Docker image: $imageName..."
+    docker build --no-cache -t $imageName .
     Write-Host "✅ Docker image built successfully"
 }
 
 # ----------------------------
-# 1️⃣ Start Docker Container
+# 1️⃣ Start Docker Container (Force Rebuild)
 # ----------------------------
 function Start-Container {
     $imageName = "pygem-modular-monolith:latest"
     $containerName = "pygem-app"
 
-    # Stop existing container if running
-    if (docker ps -q -f "name=$containerName") {
-        Write-Host "Stopping existing container $containerName..."
-        docker stop $containerName | Out-Null
-        docker rm $containerName | Out-Null
+    # Stop and remove existing container if it exists (running or stopped)
+    $existing = docker ps -aq -f "name=$containerName"
+    if ($existing) {
+        Write-Host "🛑 Stopping and removing existing container $containerName..."
+        docker stop $containerName -t 5 | Out-Null -ErrorAction SilentlyContinue
+        docker rm $containerName | Out-Null -ErrorAction SilentlyContinue
     }
 
     # Run new container
-    Write-Host "Starting container $containerName from image $imageName..."
+    Write-Host "🚀 Starting container $containerName from image $imageName..."
     docker run -d `
         --name $containerName `
         -p 8000:8000 `
@@ -47,7 +48,7 @@ function Start-Container {
 # ----------------------------
 function Follow-Logs {
     $containerName = "pygem-app"
-    Write-Host "Tailing logs for $containerName..."
+    Write-Host "📜 Tailing logs for $containerName..."
     docker logs -f $containerName
 }
 
@@ -57,5 +58,5 @@ function Follow-Logs {
 switch ($Step.ToLower()) {
     "build" { Build-Image }
     "run"   { Build-Image; Start-Container; Follow-Logs }
-    default { Write-Host "Unknown step. Valid options: build, run" }
+    default { Write-Host "❌ Unknown step. Valid options: build, run" }
 }
