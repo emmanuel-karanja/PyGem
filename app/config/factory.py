@@ -4,6 +4,7 @@ from app.shared.clients import KafkaClient
 from app.shared.event_bus import KafkaEventBus
 from app.shared.event_bus import RedisEventBus
 from app.config.settings import Settings
+from app.shared.metrics.metrics_collector import MetricsCollector
 
 settings = Settings()
 
@@ -57,10 +58,12 @@ def get_kafka_event_bus(logger: JohnWickLogger = None) -> KafkaEventBus:
     Returns a KafkaEventBus that wraps a KafkaClient internally.
     """
     logger = logger or get_logger("kafka_event_bus")
+    metrics = MetricsCollector(logger=logger)
     kafka_client = get_kafka_client(logger=logger)
     return KafkaEventBus(
         kafka_client=kafka_client,
-        logger=logger
+        logger=logger,
+        metrics=metrics
     )
 
 # ----------------------------
@@ -68,8 +71,10 @@ def get_kafka_event_bus(logger: JohnWickLogger = None) -> KafkaEventBus:
 # ----------------------------
 def get_redis_event_bus(logger: JohnWickLogger = None) -> RedisEventBus:
     logger = logger or get_logger("redis_event_bus")
+    metrics = MetricsCollector(logger=logger)
     redis_client = get_redis_client(logger=logger)
     return RedisEventBus(
         redis_client=redis_client,
-        logger=logger
+        logger=logger,
+        metrics=metrics
     )

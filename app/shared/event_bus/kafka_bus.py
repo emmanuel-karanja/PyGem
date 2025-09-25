@@ -15,6 +15,7 @@ class KafkaEventBus:
         self,
         kafka_client: Optional[KafkaClient] = None,
         logger: Optional[JohnWickLogger] = None,
+        metrics: Optional[MetricsCollector] = None
     ):
         self.logger: JohnWickLogger = logger or get_logger("KafkaEventBus")
         self.kafka_client: KafkaClient = kafka_client or KafkaClient(
@@ -29,7 +30,9 @@ class KafkaEventBus:
         self.subscribers: Dict[str, list[Callable[[str, dict], None]]] = {}
         # topic -> consume task
         self._consume_tasks: Dict[str, asyncio.Task] = {}
-        self.metrics: MetricsCollector = self.kafka_client.metrics
+
+        # Metrics (optional)
+        self.metrics: Optional[MetricsCollector] = metrics or self.kafka_client.metrics
 
     async def start(self):
         """Start Kafka producer and consumer"""
@@ -53,7 +56,15 @@ class KafkaEventBus:
         Automatically uses the client's topic if none is provided.
         """
         target_topic = topic or self.kafka_client.topic
-        await self.kafka_client.produce(key, payload)
+        try:
+            await self.kafka_client.produce(key, payload)
+            if self.metrics:
+                await self.metrics.increment("published")
+        except Exception as exc:
+            self.logger.error("Failed to publish message", extra={"key": key, "topic": target_topic, "error": str(exc)})
+            if self.metrics:
+                await self.metrics.increment("failed_publish")
+            raise
 
     async def subscribe(self, topic: str, callback: Callable[[str, dict], None]):
         """Register a subscriber callback for a specific topic and start consuming"""
@@ -65,9 +76,19 @@ class KafkaEventBus:
                 async def dispatch(key: str, value: dict):
                     # Fire-and-forget: each subscriber callback runs in its own async task
                     for cb in self.subscribers.get(topic, []):
-                        asyncio.create_task(cb(key, value))
+                        try:
+                            asyncio.create_task(cb(key, value))
+                        except Exception as exc:
+                            self.logger.exception("Subscriber callback failed", extra={"error": str(exc)})
+                            if self.metrics:
+                                await self.metrics.increment("failed_consume")
 
-                # KafkaClient.consume now receives dispatch function
-                await self.kafka_client.consume(dispatch)
+                    if self.metrics:
+                        await self.metrics.increment("consumed")
+
+                try:
+                    await self.kafka_client.consume(dispatch)
+                except Exception as exc:
+                    self.logger.exception("Consume loop failed", extra={"error": str(exc)})
 
             self._consume_tasks[topic] = asyncio.create_task(consume_loop())

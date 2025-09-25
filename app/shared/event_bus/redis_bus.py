@@ -18,6 +18,7 @@ class RedisEventBus(EventBus):
         redis_client: Optional[RedisClient] = None,
         max_retries: int = 3,
         logger: Optional[JohnWickLogger] = None,
+        metrics: Optional[MetricsCollector] = None,
     ):
         self.logger = logger or get_logger("RedisEventBus")
         self.redis_client = redis_client or RedisClient(logger=self.logger)
@@ -28,7 +29,7 @@ class RedisEventBus(EventBus):
         self._consume_tasks: Dict[str, asyncio.Task] = {}
 
         # Use the same metrics as the client
-        self.metrics: MetricsCollector = self.redis_client.metrics or MetricsCollector(self.logger)
+        self.metrics: MetricsCollector = metrics or MetricsCollector(self.logger)
       
     async def start(self):
         """
@@ -69,7 +70,7 @@ class RedisEventBus(EventBus):
                 await asyncio.sleep(0.5 * attempt)
 
         self.logger.error("Failed to publish after max retries", extra={"channel": channel, "payload": payload})
-        await self.metrics.increment("failed_publish")
+        self.metrics.increment("failed_publish")
 
     async def subscribe(self, channel: str, callback: Callable):
         """Subscribe to a Redis channel using RedisClient"""
@@ -89,7 +90,8 @@ class RedisEventBus(EventBus):
                         for cb in self.subscribers.get(channel, []):
                             # Dispatch each callback in its own async task
                             asyncio.create_task(cb(payload))
-                        await self.metrics.increment("consumed")
+                        if(self.metrics):
+                            self.metrics.increment("consumed")
                         self.logger.debug("Event consumed", extra={"channel": channel, "payload": payload})
                     except Exception as exc:
                         self.logger.exception("Failed to process message", extra={"channel": channel, "error": str(exc)})

@@ -55,9 +55,9 @@ async def lifespan(app: FastAPI):
     await wait_with_retry("Redis event bus",redis_event_bus.start)
 
    # Wait for Kafka client
-    await wait_with_retry("Kafka client", kafka_client.start)
+   # await wait_with_retry("Kafka client", kafka_client.start)
     # Wait for Kafka event bus
-    await wait_with_retry("Kafka event bus", event_bus.start)
+  #  await wait_with_retry("Kafka event bus", event_bus.start)
 
     # Init DB
     await init_db(str(settings.database_url), app_path="app")
@@ -70,7 +70,7 @@ async def lifespan(app: FastAPI):
     # Event Bus tests
     # ----------------------------
     test_payload = {"id": str(uuid.uuid4()), "message": "test"}
-    await test_event_bus(event_bus, "feature_events", test_payload)
+    await test_event_bus(redis_event_bus, "feature_events", test_payload)
     # If you have a Redis event bus, you can also test similarly:
     # await test_event_bus(redis_event_bus, "redis_test_event", test_payload)
 
