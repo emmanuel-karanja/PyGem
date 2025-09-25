@@ -1,44 +1,41 @@
 import asyncio
-import json
 from typing import Any, Dict, List, Optional
 from datetime import datetime
 import socket
 
-import aioredis
-import asyncpg
-
 from app.shared.logger import JohnWickLogger
 from app.config.settings import Settings
 from app.shared.retry.base import RetryPolicy
-from app.shared.retry import FixedDelayRetry
+from app.shared.retry.fixed_delay_retry import FixedDelayRetry
+import asyncpg
+
+from app.config.factory import get_redis_client
 
 settings = Settings()
-
 
 class HealthChecker:
     def __init__(
         self,
         logger: JohnWickLogger,
+        redis_client: Optional[get_redis_client()] = None,
         retry_policy: Optional[RetryPolicy] = None
     ):
         """
         Initialize the health checker.
         :param logger: JohnWickLogger instance
+        :param redis_client: RedisClient instance (optional)
         :param retry_policy: RetryPolicy instance (default FixedDelayRetry)
         """
         self.logger = logger
         self.retry_policy: RetryPolicy = retry_policy or FixedDelayRetry(max_retries=3)
+        self.redis_client = redis_client or get_redis_client()
 
     async def check_redis(self) -> Dict[str, Any]:
-        """Redis health check using retry policy."""
-        host, port = settings.redis.host, settings.redis.port
-
+        """Redis health check using RedisClient and retry policy."""
         async def _check():
             self.logger.info("Checking Redis...")
-            r = aioredis.Redis(host=host, port=port, decode_responses=True)
-            pong = await r.ping()
-            await r.close()
-            if pong:
+            healthy = await self.redis_client.ping()
+            if healthy:
                 self.logger.info("✅ Redis healthy")
                 return {"status": "healthy", "checked_at": datetime.utcnow().isoformat()}
             raise ConnectionError("Redis did not respond to PING")
@@ -51,7 +48,7 @@ class HealthChecker:
 
     async def check_postgres(self) -> Dict[str, Any]:
         """Postgres health check using retry policy."""
-        dsn = settings.postgres.get_database_url(settings.app.env_mode)
+        dsn = settings.postgres.get_database_url(settings.app.env_mode,for_asyncpg=True)
 
         async def _check():
             self.logger.info("Checking Postgres...")
@@ -68,7 +65,7 @@ class HealthChecker:
 
     async def check_kafka(self) -> Dict[str, Any]:
         """Kafka TCP health check using retry policy."""
-        host, port = settings.kafka.host, settings.kafka.port
+        host, port = settings.kafka.get_host(settings.app.env_mode), settings.kafka.port
 
         async def _check():
             self.logger.info("Checking Kafka...")

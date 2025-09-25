@@ -1,9 +1,8 @@
 from fastapi import FastAPI, APIRouter
 from app.config.logger import JohnWickLogger
 from app.shared.health import HealthChecker  # Assuming HealthChecker is in services/health_check.py
-import asyncio
 
-logger = JohnWickLogger("health_service")
+logger = JohnWickLogger(name="HealthCheck")
 
 # Create FastAPI router for health endpoints
 health_router = APIRouter(prefix="/health", tags=["health"])

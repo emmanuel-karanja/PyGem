@@ -66,7 +66,7 @@ class PostgresSettings(BaseSettings):
     port: int = 5432
     user: str = "myuser"
     password: str = "mypassword"
-    db_name: str = "mydatabase"
+    name: str = "mydatabase"
 
     pool_size: int = 10
     max_overflow: int = 20
@@ -79,9 +79,18 @@ class PostgresSettings(BaseSettings):
     def get_host(self, env_mode: str) -> str:
         return self.host_docker if env_mode == "docker" else self.host_local
 
-    def get_database_url(self, env_mode: str) -> str:
+    def get_database_url(self, env_mode: str, for_asyncpg: bool = True) -> str:
+        """
+        Returns a proper DSN.
+        :param for_asyncpg: True => asyncpg-compatible, False => SQLAlchemy
+        """
         host = self.get_host(env_mode)
-        return f"postgresql+asyncpg://{self.user}:{self.password}@{host}:{self.port}/{self.db_name}"
+        if for_asyncpg:
+            # ✅ Standard DSN for asyncpg
+            return f"postgresql://{self.user}:{self.password}@{host}:{self.port}/{self.name}"
+        else:
+            # ✅ SQLAlchemy + asyncpg style
+            return f"postgresql+asyncpg://{self.user}:{self.password}@{host}:{self.port}/{self.name}"
 
 
 # ----------------------------

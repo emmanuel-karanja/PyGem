@@ -1,6 +1,7 @@
 from functools import lru_cache
 from app.config.logger import JohnWickLogger, get_logger
-from app.shared.clients import RedisClient, KafkaClient, PostgresClient
+from app.shared.clients import RedisClient, KafkaClient
+from app.shared.database import PostgresClient
 from app.shared.event_bus import KafkaEventBus, RedisEventBus
 from app.shared.metrics.metrics_collector import MetricsCollector
 from app.config.settings import Settings
@@ -14,7 +15,7 @@ settings = Settings()
 # ----------------------------
 @lru_cache
 def get_redis_client() -> RedisClient:
-    logger = get_logger("redis_client")
+    logger = JohnWickLogger(name="RedisClient")
     retry_policy = ExponentialBackoffRetry(
         max_retries=settings.redis.max_retries,
         base_delay=settings.redis.retry_backoff
@@ -31,13 +32,13 @@ def get_redis_client() -> RedisClient:
 # ----------------------------
 @lru_cache
 def get_postgres_client() -> PostgresClient:
-    logger = get_logger("postgres_client")
+    logger = JohnWickLogger(name="PostgresClient")
     retry_policy = ExponentialBackoffRetry(
         max_retries=settings.postgres.max_retries,
         base_delay=settings.postgres.retry_backoff
     )
     return PostgresClient(
-        dsn=settings.postgres.get_database_url(settings.app.env_mode),
+        dsn=settings.postgres.get_database_url(env_mode=settings.app.env_mode,for_asyncpg=True),
         logger=logger,
         retry_policy=retry_policy
     )
@@ -48,7 +49,7 @@ def get_postgres_client() -> PostgresClient:
 # ----------------------------
 @lru_cache
 def get_kafka_client() -> KafkaClient:
-    logger = get_logger("kafka_client")
+    logger = JohnWickLogger(name="RedisEventBus")
     retry_policy = ExponentialBackoffRetry(
         max_retries=settings.kafka.max_retries,
         base_delay=settings.kafka.retry_backoff
@@ -70,7 +71,7 @@ def get_kafka_client() -> KafkaClient:
 # ----------------------------
 @lru_cache
 def get_redis_event_bus() -> RedisEventBus:
-    logger = get_logger("redis_event_bus")
+    logger = JohnWickLogger(name="RedisEventBus")
     metrics = MetricsCollector(logger=logger)
     return RedisEventBus(
         redis_client=get_redis_client(),
@@ -88,7 +89,7 @@ def get_redis_event_bus() -> RedisEventBus:
 # ----------------------------
 @lru_cache
 def get_kafka_event_bus() -> KafkaEventBus:
-    logger = get_logger("kafka_event_bus")
+    logger = JohnWickLogger(name="KafkaEventBus")
     metrics = MetricsCollector(logger=logger)
     return KafkaEventBus(
         kafka_client=get_kafka_client(),

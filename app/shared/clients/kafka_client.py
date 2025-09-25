@@ -7,8 +7,8 @@ from aiokafka import AIOKafkaProducer, AIOKafkaConsumer
 from app.config.logger import JohnWickLogger, get_logger
 from app.shared.metrics.metrics_collector import MetricsCollector
 from app.shared.metrics.metrics_schema import KafkaMetrics
-from retry.base import RetryPolicy
-from retry.fixed_delay_retry import FixedDelayRetry
+from app.shared.retry.base import RetryPolicy
+from app.shared.retry.fixed_delay_retry import FixedDelayRetry
 
 
 

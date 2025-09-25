@@ -2,14 +2,14 @@ import asyncio
 import json
 from typing import Any, Optional, Callable
 from redis.asyncio import Redis
-from app.config.logger import logger, JohnWickLogger, get_logger
+from app.config.logger import JohnWickLogger
 from app.shared.metrics.metrics_collector import MetricsCollector
 from app.shared.metrics.metrics_schema import RedisMetrics
 from app.config.settings import Settings
 from app.shared.retry.base import RetryPolicy
 from app.shared.retry.fixed_delay_retry import FixedDelayRetry
 
-
+settings=Settings()
 class RedisClient:
     """
     Bulletproof Redis client with:
@@ -22,17 +22,39 @@ class RedisClient:
 
     def __init__(
         self,
-        redis_url: str = Settings.redis_url,
+        redis_url: str = settings.redis.get_url,
         logger: Optional[JohnWickLogger] = None,
         retry_policy: Optional[RetryPolicy] = None,
     ):
-        self.redis_url = redis_url
-        self.logger: JohnWickLogger = get_logger() or logger or JohnWickLogger("RedisClient")
+        self.redis = redis_url
+        self.logger: JohnWickLogger = JohnWickLogger("RedisClient")
         self.redis: Optional[Redis] = None
         self.metrics = MetricsCollector(self.logger)
         # Retry policy: default to FixedDelayRetry if none provided
         self.retry_policy: RetryPolicy = retry_policy or FixedDelayRetry(max_retries=3)
+    async def ping(self) -> bool:
+            """
+            Ping Redis to check connectivity.
+            Returns True if Redis responds, False otherwise.
+            """
+            if self.redis is None:
+                await self.connect()
 
+            async def _ping():
+                result = await self.redis.ping()
+                self.logger.info("Redis PING", extra={"result": result})
+                self.metrics.increment(RedisMetrics.PING)
+                return result
+
+            try:
+                return await self.retry_policy.execute(_ping)
+            except Exception:
+                self.logger.error("Redis PING failed", extra={"redis_url": self.redis_url})
+                self.metrics.increment(RedisMetrics.FAILED_PING)
+                self.metrics.report()
+                return False
+
+       
     async def connect(self):
         """Connect to Redis using retry policy."""
         async def _connect():

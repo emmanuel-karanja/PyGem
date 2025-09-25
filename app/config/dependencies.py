@@ -2,7 +2,7 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.config.db_session import get_sessionmaker
 from app.shared.database import PostgresClient
-from app.config.factory import get_logger, get_redis_client, get_kafka_event_bus,get_kafka_client,get_redis_event_bus
+from app.config.factory import get_logger, get_redis_client, get_kafka_event_bus,get_kafka_client,get_redis_event_bus,get_postgres_client
 from app.config.settings import Settings
 
 # ----------------------------
@@ -10,17 +10,14 @@ from app.config.settings import Settings
 # ----------------------------
 settings = Settings()
 logger = get_logger()
-redis_client = get_redis_client(logger)
-redis_event_bus=get_redis_event_bus(logger)
-kafka_client=get_kafka_client(logger)
-kafka_event_bus = get_kafka_event_bus(logger)
-
-# Instead of database_url due sqlalchemy issue
-pg_dsn = f"postgresql://{settings.db_user}:{settings.db_password}@{settings.db_host}:{settings.db_port}/{settings.db_name}"
-postgres_client = PostgresClient(dsn=pg_dsn, logger=logger)
+redis_client = get_redis_client()
+redis_event_bus=get_redis_event_bus()
+kafka_client=get_kafka_client()
+kafka_event_bus = get_kafka_event_bus()
+postgres_client = get_postgres_client()
 
 # SQLAlchemy AsyncSession factory
-async_sessionmaker = get_sessionmaker(settings.database_url)
+async_sessionmaker = get_sessionmaker(settings.postgres.get_database_url(settings.app.env_mode,for_asyncpg=False))
 
 # ----------------------------
 # Dependency Injection Functions

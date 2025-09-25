@@ -8,7 +8,7 @@ from app.config.settings import Settings
 settings = Settings()
 
 # Ensure the log directory exists
-log_dir = os.path.dirname(settings.log_file)
+log_dir = os.path.dirname(settings.app.log_file)
 if log_dir and not os.path.exists(log_dir):
     os.makedirs(log_dir, exist_ok=True)
 
@@ -24,9 +24,9 @@ def get_logger() -> Logger:
     global _logger
     if _logger is None:
         _logger = JohnWickLogger(
-            name=settings.app_name,
-            log_file=settings.log_file,
-            level=settings.log_level
+            name=settings.app.app_name,
+            log_file=settings.app.log_file,
+            level=settings.app.log_level
         )
     return _logger
 
