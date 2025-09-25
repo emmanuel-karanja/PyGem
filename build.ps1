@@ -1,5 +1,5 @@
 # ----------------------------
-# PyGem Full Setup Script
+# PyGem Full Setup Script (Fixed)
 # ----------------------------
 
 param (
@@ -28,6 +28,10 @@ function Ensure-Python {
         $version = & $pythonCmd --version 2>$null
         if ($version) {
             Write-Host "✅ Python installed successfully: $version"
+            set PYTHONUTF8=1
+            python -m pytest
+            python app/main.py
+
         } else {
             Write-Error "❌ Python installation failed. Please install manually."
             exit 1
@@ -51,6 +55,9 @@ function Setup-Venv {
 
     $global:PythonExe = "$venvPath\Scripts\python.exe"
     $global:PipExe    = "$venvPath\Scripts\pip.exe"
+
+    # Ensure the current session uses venv
+    $env:PATH = "$venvPath\Scripts;$env:PATH"
 }
 
 # ----------------------------
@@ -80,9 +87,6 @@ function Start-Docker {
         exit 1
     }
 
-    # ----------------------------
-    # Check existing containers
-    # ----------------------------
     $services = @("pygem_postgres", "pygem_redis", "pygem_kafka", "pygem_zookeeper")
     $toStart = $false
 
@@ -151,42 +155,38 @@ function Wait-RedisReady {
 }
 
 # ----------------------------
-# Helper: Wait for Kafka (internal + host)
+# Helper: Wait for Kafka
 # ----------------------------
 function Wait-KafkaReady {
     param([string]$ContainerName, [int]$Retries=20, [int]$Delay=5)
-
     Write-Host "⏳ Waiting for Kafka to be ready..."
-
     for ($i=1; $i -le $Retries; $i++) {
         try {
             $cid = docker ps -q -f "name=$ContainerName"
             if (-not $cid) { throw "Container not found" }
-
-            # Check Kafka logs for startup
             $logs = docker logs $cid --tail 20 2>$null
             if ($logs -match "started \(kafka.server.KafkaServer\)") {
                 Write-Host "`n✅ Kafka is ready"
                 return
             }
         } catch { }
-
-        # Print a dot for progress
         Write-Host -NoNewline "."
         Start-Sleep -Seconds $Delay
     }
-
     Write-Host
     Write-Error "❌ Kafka did not become ready in time"; exit 1
 }
-
 
 # ----------------------------
 # 4️⃣ Run Tests
 # ----------------------------
 function Run-Tests {
-    Write-Host "Installing pytest dependencies..."
+    # Ensure pytest & asyncio plugin installed in venv
     & $PipExe install pytest pytest-asyncio --quiet
+
+    # Set PYTHONPATH so 'app' is discoverable
+    $env:PYTHONPATH = (Get-Location)
+
     Write-Host "Running tests..."
     & $PythonExe -m pytest tests --maxfail=1 --disable-warnings -q
     Write-Host "✅ Tests completed"
@@ -196,6 +196,7 @@ function Run-Tests {
 # 5️⃣ Run Example Project
 # ----------------------------
 function Run-Project {
+    $env:PYTHONPATH = (Get-Location)
     Write-Host "Starting example project..."
     & $PythonExe -m app.main
 }

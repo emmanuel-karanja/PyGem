@@ -1,26 +1,23 @@
-# john_wick_logger_structlog.py
+# john_wick_logger_loguru.py
 import sys
 import threading
 import queue
 import json
 import inspect
 from typing import Any, Dict, Optional
-from logging import StreamHandler, Formatter, getLogger, INFO
-from logging.handlers import RotatingFileHandler
-
-import structlog
-from structlog.stdlib import LoggerFactory
-from structlog.processors import TimeStamper, JSONRenderer
+from datetime import datetime
+from loguru import logger
 from colorama import init as colorama_init, Fore, Style
+import asyncio
 
-
-
+# Initialize colorama
 colorama_init(autoreset=True)
 
 # ----------------------------
 # Queue for interactive log expansion
 # ----------------------------
 expand_queue = queue.Queue()
+
 
 def listen_for_expand():
     """Wait for Enter to expand logs interactively."""
@@ -30,46 +27,60 @@ def listen_for_expand():
         _ = sys.stdin.readline()
         try:
             record = expand_queue.get_nowait()
-            print("\n💡 Expanded log extra:")
-            print(json.dumps(record, indent=2))
+            print("\nExpanded log extra:")
+            print(json.dumps(record, indent=2, ensure_ascii=False))
         except queue.Empty:
             continue
 
+
 # ----------------------------
-# Custom processors
+# Helper: get caller module/class
 # ----------------------------
-def add_module_class(logger, method_name, event_dict):
-    """Add caller module and class info dynamically."""
+def get_caller_info():
+    """Get first non-logger caller module and class."""
     frame = inspect.currentframe()
-    if frame is None:
-        return event_dict
-    frame = frame.f_back.f_back  # Skip structlog internal frames
-    module_name = frame.f_globals.get("__name__", "unknown_module")
-    cls = frame.f_locals.get("self", None)
-    class_name = cls.__class__.__name__ if cls else "unknown_class"
-    event_dict["logger"] = f"[{module_name}][{class_name}]"
-    return event_dict
+    if not frame:
+        return "unknown_module", "unknown_class"
 
-def interactive_queue_processor(logger, method_name, event_dict):
-    """Push log extras to the interactive queue if present."""
-    extra = event_dict.get("extra")
-    if extra:
-        expand_queue.put(extra)
-    return event_dict
+    while frame:
+        module_name = frame.f_globals.get("__name__", "")
+        cls = frame.f_locals.get("self", None)
+        if module_name != __name__:
+            class_name = cls.__class__.__name__ if cls else "module-level"
+            return module_name, class_name
+        frame = frame.f_back
 
-def color_console_renderer(_, __, event_dict):
-    """Render colored JSON log for console."""
-    level = event_dict.get("level", "INFO")
-    color_map = {
-        "DEBUG": Fore.CYAN,
+    return "unknown_module", "unknown_class"
+
+
+# ----------------------------
+# Console formatter
+# ----------------------------
+def console_formatter(record):
+    timestamp = record["time"].isoformat()
+    level = record["level"].name.ljust(9)  # fixed width for level
+    msg = record["message"]
+
+    color = {
+        "DEBUG": Fore.BLUE,
         "INFO": Fore.GREEN,
         "WARNING": Fore.YELLOW,
         "ERROR": Fore.RED,
-        "CRITICAL": Fore.MAGENTA
-    }
-    color = color_map.get(level, Fore.WHITE)
-    json_str = json.dumps(event_dict)
-    return f"{color}{json_str}{Style.RESET_ALL}"
+        "CRITICAL": Fore.MAGENTA,
+        "EXCEPTION": Fore.RED,
+    }.get(record["level"].name, "")
+
+    module = record["extra"].get("module", "unknown_module")
+    cls = record["extra"].get("class", "unknown_class")
+    extra_data = record["extra"].get("extra_data", {})
+
+    # Fix width for module/class
+    module_cls = f"[{module}][{cls}]".ljust(45)
+
+    extra_json = f"\nExtra: {json.dumps(extra_data, indent=2, ensure_ascii=False)}" if extra_data else ""
+
+    return f"{color}{timestamp} | {level} | {module_cls} {msg}{extra_json}{Style.RESET_ALL}\n"
+
 
 # ----------------------------
 # JohnWickLogger
@@ -79,70 +90,74 @@ class JohnWickLogger:
         self,
         name: str,
         log_file: str = "app.log",
-        max_bytes: int = 10_000_000,
-        backup_count: int = 5,
         level: str = "INFO",
         interactive: bool = False,
-        color_console: bool = True,
     ):
         self.name = name
         self.interactive = interactive
-        self.color_console = color_console
 
-        # Start interactive thread
         if self.interactive:
             threading.Thread(target=listen_for_expand, daemon=True).start()
 
-        # Standard library root logger for file + console
-        root_logger = getLogger(name)
-        root_logger.setLevel(level)
-        root_logger.propagate = False
+        # Remove default Loguru logger
+        logger.remove()
 
-        # Rotating file handler
-        file_handler = RotatingFileHandler(
-            log_file, maxBytes=max_bytes, backupCount=backup_count
-        )
-        file_handler.setLevel(level)
-        file_handler.setFormatter(Formatter("%(message)s"))
-        root_logger.addHandler(file_handler)
-
-        # Console handler
-        console_handler = StreamHandler(sys.stdout)
-        console_handler.setLevel(level)
-        console_handler.setFormatter(Formatter("%(message)s"))
-        root_logger.addHandler(console_handler)
-
-        # Configure structlog
-        structlog.configure(
-            processors=[
-                add_module_class,
-                interactive_queue_processor if self.interactive else (lambda logger, method_name, event_dict: event_dict),
-                structlog.processors.add_log_level,
-                TimeStamper(fmt="iso"),
-                JSONRenderer() if not color_console else color_console_renderer,
-            ],
-            context_class=dict,
-            logger_factory=LoggerFactory(),
-            wrapper_class=structlog.stdlib.BoundLogger,
-            cache_logger_on_first_use=True,
+        # File logger (JSON structured)
+        logger.add(
+            log_file,
+            rotation="10 MB",
+            retention=5,
+            level=level,
+            serialize=True,
+            enqueue=True,  # thread-safe / async-safe
         )
 
-        self._logger = structlog.get_logger(name).bind(name=name)
+        # Console logger (colored, human-readable)
+        logger.add(
+            sys.stdout,
+            format=console_formatter,
+            level=level,
+            enqueue=True,  # thread-safe / async-safe
+        )
 
     # ----------------------------
     # Logging methods
     # ----------------------------
-    def debug(self, msg: str, extra: Optional[Dict[str, Any]] = None, **kwargs):
-        self._logger.debug(msg, extra=extra, **kwargs)
+    def debug(self, msg: str, extra: Optional[Dict[str, Any]] = None):
+        self._log("DEBUG", msg, extra)
 
-    def info(self, msg: str, extra: Optional[Dict[str, Any]] = None, **kwargs):
-        self._logger.info(msg, extra=extra, **kwargs)
+    def info(self, msg: str, extra: Optional[Dict[str, Any]] = None):
+        self._log("INFO", msg, extra)
 
-    def warning(self, msg: str, extra: Optional[Dict[str, Any]] = None, **kwargs):
-        self._logger.warning(msg, extra=extra, **kwargs)
+    def warning(self, msg: str, extra: Optional[Dict[str, Any]] = None):
+        self._log("WARNING", msg, extra)
 
-    def error(self, msg: str, extra: Optional[Dict[str, Any]] = None, **kwargs):
-        self._logger.error(msg, extra=extra, **kwargs)
+    def error(self, msg: str, extra: Optional[Dict[str, Any]] = None):
+        self._log("ERROR", msg, extra)
 
-    def exception(self, msg: str, extra: Optional[Dict[str, Any]] = None, **kwargs):
-        self._logger.exception(msg, extra=extra, **kwargs)
+    def exception(self, msg: str, extra: Optional[Dict[str, Any]] = None):
+        self._log("EXCEPTION", msg, extra)
+
+    # ----------------------------
+    # Async helper
+    # ----------------------------
+    async def log_async(self, level: str, msg: str, extra: Optional[Dict[str, Any]] = None):
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, self._log, level, msg, extra)
+
+    # ----------------------------
+    # Internal log helper
+    # ----------------------------
+    def _log(self, level: str, msg: str, extra: Optional[Dict[str, Any]]):
+        module, cls = get_caller_info()
+        log_extra = {
+            "module": module,
+            "class": cls,
+            "extra_data": extra or {}
+        }
+
+        # Push extra to interactive queue
+        if self.interactive and extra:
+            expand_queue.put(extra)
+
+        logger.log(level, msg, extra=log_extra)
