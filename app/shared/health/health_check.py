@@ -2,13 +2,12 @@ import asyncio
 import json
 from typing import Any, Dict, List, Optional
 from datetime import datetime
+import socket
 
 from app.shared.logger import JohnWickLogger
 from app.config.dependencies import redis_client, event_bus, postgres_client
-import aioredis
+import redis.asyncio as redis
 import asyncpg
-import socket
-import time
 
 # ----------------------------
 # HealthChecker Class
@@ -26,12 +25,13 @@ class HealthChecker:
         self.retry_delay = retry_delay
 
     async def check_redis(self) -> Dict[str, Any]:
+        """Check Redis health"""
         for attempt in range(1, self.retries + 1):
             try:
                 self.logger.info(f"Checking Redis (attempt {attempt})...")
-                redis = await aioredis.from_url(f"redis://{redis_client.host}:{redis_client.port}")
-                pong = await redis.ping()
-                await redis.close()
+                r = redis.Redis(host=redis_client.host, port=redis_client.port, decode_responses=True)
+                pong = await r.ping()
+                await r.close()
                 if pong:
                     self.logger.info("✅ Redis healthy")
                     return {"status": "healthy", "checked_at": datetime.utcnow().isoformat()}
@@ -41,6 +41,7 @@ class HealthChecker:
         return {"status": "unhealthy", "error": "Cannot connect to Redis", "checked_at": datetime.utcnow().isoformat()}
 
     async def check_postgres(self) -> Dict[str, Any]:
+        """Check PostgreSQL health"""
         for attempt in range(1, self.retries + 1):
             try:
                 self.logger.info(f"Checking Postgres (attempt {attempt})...")
@@ -67,10 +68,7 @@ class HealthChecker:
         return {"status": "unhealthy", "error": "Cannot connect to Kafka", "checked_at": datetime.utcnow().isoformat()}
 
     async def run_all(self, services: Optional[List[str]] = None) -> Dict[str, Any]:
-        """
-        Run all health checks or a subset of services.
-        :param services: List of services to check (default: all)
-        """
+        """Run all health checks or a subset of services."""
         if services is None:
             services = ["redis", "postgres", "kafka"]
 
@@ -96,21 +94,3 @@ class HealthChecker:
 
         return results
 
-# ----------------------------
-# CLI Example
-# ----------------------------
-if __name__ == "__main__":
-    import typer
-
-    app = typer.Typer()
-    logger = JohnWickLogger("health_service")
-
-    @app.command()
-    def check(services: str = "all"):
-        """Run health checks from CLI"""
-        service_list = None if services == "all" else services.split(",")
-        hc = HealthChecker(logger=logger)
-        results = asyncio.run(hc.run_all(service_list))
-        print(json.dumps(results, indent=2))
-
-    app()

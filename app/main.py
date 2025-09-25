@@ -14,7 +14,7 @@ from app.config.db_session import init_db
 import asyncio
 
 # HealthChecker import
-from app.services.health_check import HealthChecker  # make sure you have this file
+from app.shared.health import HealthChecker  # make sure you have this file
 
 settings = Settings()
 health_checker = HealthChecker(logger=logger)
