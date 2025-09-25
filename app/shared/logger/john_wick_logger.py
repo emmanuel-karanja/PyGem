@@ -44,7 +44,7 @@ class JohnWickLogger:
             sys.stdout,
             colorize=True,
             level=level,
-            format="<green>{time:HH:mm:ss}</green> | {level} | {message}",
+           format="<level>{time:YYYY-MM-DD HH:mm:ss.SSS} | {level} |  {message}</level>",
             enqueue=True,
         )
 
