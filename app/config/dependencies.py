@@ -1,7 +1,7 @@
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from session import get_sessionmaker
-from database import HighThroughputPostgresClient
+from database import PostgresClient
 from app.config.factory import get_logger, get_redis_client, get_kafka_event_bus
 from app.config.settings import Settings
 
@@ -12,7 +12,7 @@ settings = Settings()
 logger = get_logger()
 redis_client = get_redis_client(logger)
 event_bus = get_kafka_event_bus(logger)
-postgres_client = HighThroughputPostgresClient(dsn=settings.database_url, logger=logger)
+postgres_client = PostgresClient(dsn=settings.database_url, logger=logger)
 
 # SQLAlchemy AsyncSession factory
 async_sessionmaker = get_sessionmaker(settings.database_url)

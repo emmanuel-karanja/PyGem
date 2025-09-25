@@ -9,7 +9,7 @@ from retry.base import RetryPolicy
 from metrics.metrics_collector import MetricsCollector
 
 
-class HighThroughputPostgresClient(DatabaseClient):
+class PostgresClient(DatabaseClient):
     def __init__(
         self,
         dsn: str,
