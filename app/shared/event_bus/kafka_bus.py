@@ -37,7 +37,7 @@ class KafkaEventBus:
         self.metrics: Optional[MetricsCollector] = metrics or self.kafka_client.metrics
 
         # Retry policy (optional)
-        self.retry_policy: Optional[RetryPolicy] = retry_policy or FixedDelayRetry()
+        self.retry_policy: Optional[RetryPolicy] = retry_policy or FixedDelayRetry(max_retries=3)
 
     async def start(self):
         """Start Kafka producer and consumer"""

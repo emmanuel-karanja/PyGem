@@ -25,7 +25,7 @@ class HealthChecker:
         :param retry_policy: RetryPolicy instance (default FixedDelayRetry)
         """
         self.logger = logger
-        self.retry_policy: RetryPolicy = retry_policy or FixedDelayRetry()
+        self.retry_policy: RetryPolicy = retry_policy or FixedDelayRetry(max_retries=3)
 
     async def check_redis(self, host: str = "127.0.0.1", port: int = 6379) -> Dict[str, Any]:
         """Redis health check using retry policy."""

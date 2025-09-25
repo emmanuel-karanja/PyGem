@@ -1,9 +1,8 @@
 import pytest
 import json
-import asyncio
 
 from app.shared.clients.kafka_client import KafkaClient
-from app.shared.retry.exponential_backoff_retry import ExponentialBackoffRetry
+from app.shared.retry import ExponentialBackoffRetry
 from app.config.logger import logger
 
 

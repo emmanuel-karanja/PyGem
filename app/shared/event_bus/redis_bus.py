@@ -33,7 +33,7 @@ class RedisEventBus(EventBus):
         self.metrics: MetricsCollector = metrics or MetricsCollector(self.logger)
 
         # Retry policy: default to FixedDelayRetry if not provided
-        self.retry_policy: RetryPolicy = retry_policy or FixedDelayRetry()
+        self.retry_policy: RetryPolicy = retry_policy or FixedDelayRetry(max_retries=3)
 
     async def start(self):
         """Start the RedisEventBus: connect the client and initialize all subscriber channels."""

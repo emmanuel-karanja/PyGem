@@ -31,7 +31,7 @@ class RedisClient:
         self.redis: Optional[Redis] = None
         self.metrics = MetricsCollector(self.logger)
         # Retry policy: default to FixedDelayRetry if none provided
-        self.retry_policy: RetryPolicy = retry_policy or FixedDelayRetry()
+        self.retry_policy: RetryPolicy = retry_policy or FixedDelayRetry(max_retries=3)
 
     async def connect(self):
         """Connect to Redis using retry policy."""
