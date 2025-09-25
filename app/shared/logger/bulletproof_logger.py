@@ -3,7 +3,13 @@ import sys
 from logging.handlers import RotatingFileHandler
 import json
 from typing import Any, Dict, Optional
+from colorama import init as colorama_init, Fore, Style
 
+colorama_init(autoreset=True)  # automatically reset colors after each print
+
+# ----------------------------
+# Custom JSON Formatter
+# ----------------------------
 class JsonFormatter(logging.Formatter):
     """Formatter that outputs logs in structured JSON format"""
     def format(self, record: logging.LogRecord) -> str:
@@ -19,16 +25,29 @@ class JsonFormatter(logging.Formatter):
             log_record["extra"] = record.extra
         return json.dumps(log_record)
 
+# ----------------------------
+# Colored Console Formatter
+# ----------------------------
+class ColoredFormatter(logging.Formatter):
+    COLORS = {
+        "DEBUG": Fore.CYAN,
+        "INFO": Fore.GREEN,
+        "WARNING": Fore.YELLOW,
+        "ERROR": Fore.RED,
+        "CRITICAL": Fore.MAGENTA
+    }
+
+    def format(self, record: logging.LogRecord) -> str:
+        color = self.COLORS.get(record.levelname, Fore.WHITE)
+        msg = f"{self.formatTime(record, '%Y-%m-%d %H:%M:%S')} - {record.name} - {record.levelname} - {record.getMessage()}"
+        if record.exc_info:
+            msg += "\n" + self.formatException(record.exc_info)
+        return f"{color}{msg}{Style.RESET_ALL}"
+
+# ----------------------------
+# BulletproofLogger
+# ----------------------------
 class BulletproofLogger(logging.Logger):
-    """
-    BulletproofLogger: fully compatible with Python's Logger interface.
-    Features:
-        - Structured JSON output
-        - Rotating file + console logging
-        - Thread-safe / async-safe
-        - Supports injection anywhere
-        - Accepts extra structured data
-    """
     def __init__(
         self,
         name: str,
@@ -42,17 +61,17 @@ class BulletproofLogger(logging.Logger):
         self.propagate = False  # prevent double logging
 
         if not self.handlers:
-            # Console handler
+            # Console handler with colors
             console_handler = logging.StreamHandler(sys.stdout)
             console_handler.setLevel(level)
-            console_handler.setFormatter(JsonFormatter() if json_format else logging.Formatter(
-                "%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
-            
-            # Rotating file handler
+            console_handler.setFormatter(
+                ColoredFormatter() if not json_format else JsonFormatter()
+            )
+
+            # Rotating file handler (always JSON)
             file_handler = RotatingFileHandler(log_file, maxBytes=max_bytes, backupCount=backup_count)
             file_handler.setLevel(level)
-            file_handler.setFormatter(JsonFormatter() if json_format else logging.Formatter(
-                "%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
+            file_handler.setFormatter(JsonFormatter())
 
             self.addHandler(console_handler)
             self.addHandler(file_handler)

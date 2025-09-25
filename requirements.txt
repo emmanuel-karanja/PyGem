@@ -10,3 +10,4 @@ asyncpg>=0.30.0
 tenacity>=8.0          # optional, if using a retry library
 SQLAlchemy>=2.0.43
 psycopg2-binary>=2.9.9 # PostgreSQL driver for sync queries (optional if only asyncpg used)
+colorama==0.4.6
