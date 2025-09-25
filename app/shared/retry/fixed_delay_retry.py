@@ -1,14 +1,14 @@
 import asyncio
 from typing import Any, Awaitable, Callable
 from app.shared.retry.base import RetryPolicy
-from app.config.logger import get_logger
+from app.config.logger import get_logger,JohnWickLogger
 
 
 class FixedDelayRetry(RetryPolicy):
     def __init__(self, max_retries: int = 3, delay: float = 1.0):
         self.max_retries = max_retries
         self.delay = delay
-        self.logger = get_logger()
+        self.logger = get_logger() or JohnWickLogger(name="FixedDelayRetry")
 
     async def execute(self, func: Callable[..., Awaitable[Any]], *args, **kwargs) -> Any:
         for attempt in range(1, self.max_retries + 1):
