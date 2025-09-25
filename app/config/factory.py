@@ -8,6 +8,7 @@ from app.shared.retry import ExponentialBackoffRetry
 
 settings = Settings()
 
+
 # ----------------------------
 # Redis client factory
 # ----------------------------
@@ -15,14 +16,15 @@ settings = Settings()
 def get_redis_client() -> RedisClient:
     logger = get_logger("redis_client")
     retry_policy = ExponentialBackoffRetry(
-        max_retries=settings.redis_max_retries,
-        base_delay=settings.redis_retry_backoff
+        max_retries=settings.redis.max_retries,
+        base_delay=settings.redis.retry_backoff
     )
     return RedisClient(
-        redis_url=settings.redis_url,
+        redis_url=settings.redis.get_url(settings.app.env_mode),
         logger=logger,
         retry_policy=retry_policy
     )
+
 
 # ----------------------------
 # Postgres client factory
@@ -31,14 +33,15 @@ def get_redis_client() -> RedisClient:
 def get_postgres_client() -> PostgresClient:
     logger = get_logger("postgres_client")
     retry_policy = ExponentialBackoffRetry(
-        max_retries=settings.db_max_retries,
-        base_delay=settings.db_retry_backoff
+        max_retries=settings.postgres.max_retries,
+        base_delay=settings.postgres.retry_backoff
     )
     return PostgresClient(
-        dsn=settings.db_dsn,
+        dsn=settings.postgres.get_database_url(settings.app.env_mode),
         logger=logger,
         retry_policy=retry_policy
     )
+
 
 # ----------------------------
 # Kafka client factory
@@ -47,19 +50,20 @@ def get_postgres_client() -> PostgresClient:
 def get_kafka_client() -> KafkaClient:
     logger = get_logger("kafka_client")
     retry_policy = ExponentialBackoffRetry(
-        max_retries=settings.kafka_max_retries,
-        base_delay=settings.kafka_retry_backoff
+        max_retries=settings.kafka.max_retries,
+        base_delay=settings.kafka.retry_backoff
     )
     return KafkaClient(
-        bootstrap_servers=settings.kafka_bootstrap_servers,
-        topic=settings.kafka_default_topic,
-        dlq_topic=settings.kafka_dlq_topic,
-        group_id=settings.kafka_group_id,
+        bootstrap_servers=settings.kafka.get_bootstrap_servers(settings.app.env_mode),
+        topic=settings.kafka.default_topic,
+        dlq_topic=settings.kafka.dlq_topic,
+        group_id=settings.kafka.group_id,
         logger=logger,
         retry_policy=retry_policy,
-        max_concurrency=settings.kafka_max_concurrency,
-        batch_size=settings.kafka_batch_size,
+        max_concurrency=settings.kafka.max_concurrency,
+        batch_size=settings.kafka.batch_size,
     )
+
 
 # ----------------------------
 # Redis EventBus factory
@@ -72,10 +76,12 @@ def get_redis_event_bus() -> RedisEventBus:
         redis_client=get_redis_client(),
         logger=logger,
         retry_policy=ExponentialBackoffRetry(
-        max_retries=settings.redis_max_retries,
-        base_delay=settings.redis_retry_backoff),
+            max_retries=settings.redis.max_retries,
+            base_delay=settings.redis.retry_backoff
+        ),
         metrics=metrics
     )
+
 
 # ----------------------------
 # Kafka EventBus factory
@@ -88,8 +94,8 @@ def get_kafka_event_bus() -> KafkaEventBus:
         kafka_client=get_kafka_client(),
         logger=logger,
         metrics=metrics,
-        retry_policy = ExponentialBackoffRetry(
-        max_retries=settings.kafka_max_retries,
-        base_delay=settings.kafka_retry_backoff
-    )
+        retry_policy=ExponentialBackoffRetry(
+            max_retries=settings.kafka.max_retries,
+            base_delay=settings.kafka.retry_backoff
+        )
     )

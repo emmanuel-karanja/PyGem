@@ -1,94 +1,98 @@
 from pydantic_settings import BaseSettings
 from pydantic import Field
 
-
-class Settings(BaseSettings):
-    # ----------------------------
-    # General
-    # ----------------------------
+# ----------------------------
+# General / App settings
+# ----------------------------
+class AppSettings(BaseSettings):
     app_name: str = "ModularMonolithApp"
     debug: bool = True
     env_mode: str = "local"  # "local" or "docker"
 
-    # ----------------------------
-    # Redis
-    # ----------------------------
-    redis_host_local: str = "127.0.0.1"
-    redis_host_docker: str = "pygem_redis"
-    redis_port: int = 6379
-
-    redis_max_retries: int = 5
-    redis_retry_backoff: float = 1.0
-
-    @property
-    def redis_host(self) -> str:
-        return self.redis_host_docker if self.env_mode == "docker" else self.redis_host_local
-
-    @property
-    def redis_url(self) -> str:
-        return f"redis://{self.redis_host}:{self.redis_port}/0"
-
-    # ----------------------------
-    # Kafka
-    # ----------------------------
-    kafka_host_local: str = "127.0.0.1"
-    kafka_host_docker: str = "pygem_kafka"
-    kafka_port: int = 9092
-    kafka_topic: str = "feature_events"
-    kafka_dlq_topic: str = "feature_events_dlq"
-    kafka_group_id: str = "feature_group"
-    kafka_default_topic:str="pygem_default"
-
-    kafka_max_concurrency: int = 5
-    kafka_batch_size: int = 10
-    kafka_max_retries=5
-    kafka_retry_backoff=1.0
-
-    @property
-    def kafka_host(self) -> str:
-        return self.kafka_host_docker if self.env_mode == "docker" else self.kafka_host_local
-
-    @property
-    def kafka_bootstrap_servers(self) -> str:
-        # For local mode, use 127.0.0.1:9092
-        return f"{self.kafka_host}:{self.kafka_port}"
-
-
-    # ----------------------------
     # Logger
-    # ----------------------------
     log_file: str = "app.log"
     log_level: str = "INFO"
 
-    # ----------------------------
-    # PostgreSQL / SQLAlchemy
-    # ----------------------------
-    db_host_local: str = "127.0.0.1"
-    db_host_docker: str = "pygem_postgres"
-    db_port: int = 5432
-    db_user: str = "myuser"
-    db_password: str = "mypassword"
+
+# ----------------------------
+# Redis settings
+# ----------------------------
+class RedisSettings(BaseSettings):
+    host_local: str = "127.0.0.1"
+    host_docker: str = "pygem_redis"
+    port: int = 6379
+
+    max_retries: int = 5
+    retry_backoff: float = 1.0
+
+    def get_host(self, env_mode: str) -> str:
+        return self.host_docker if env_mode == "docker" else self.host_local
+
+    def get_url(self, env_mode: str) -> str:
+        return f"redis://{self.get_host(env_mode)}:{self.port}/0"
+
+
+# ----------------------------
+# Kafka settings
+# ----------------------------
+class KafkaSettings(BaseSettings):
+    host_local: str = "127.0.0.1"
+    host_docker: str = "pygem_kafka"
+    port: int = 9092
+
+    default_topic: str = "pygem_default"
+    feature_topic: str = "feature_events"
+    dlq_topic: str = "feature_events_dlq"
+    group_id: str = "feature_group"
+
+    max_concurrency: int = 5
+    batch_size: int = 10
+    max_retries: int = 5
+    retry_backoff: float = 1.0
+
+    def get_host(self, env_mode: str) -> str:
+        return self.host_docker if env_mode == "docker" else self.host_local
+
+    def get_bootstrap_servers(self, env_mode: str) -> str:
+        return f"{self.get_host(env_mode)}:{self.port}"
+
+
+# ----------------------------
+# PostgreSQL / DB settings
+# ----------------------------
+class PostgresSettings(BaseSettings):
+    host_local: str = "127.0.0.1"
+    host_docker: str = "pygem_postgres"
+    port: int = 5432
+    user: str = "myuser"
+    password: str = "mypassword"
     db_name: str = "mydatabase"
 
-    @property
-    def db_host(self) -> str:
-        return self.db_host_docker if self.env_mode == "docker" else self.db_host_local
+    pool_size: int = 10
+    max_overflow: int = 20
+    pool_timeout: int = 30
+    pool_recycle: int = 1800
 
-    @property
-    def database_url(self) -> str:
-        return f"postgresql+asyncpg://{self.db_user}:{self.db_password}@{self.db_host}:{self.db_port}/{self.db_name}"
+    max_retries: int = 3
+    retry_backoff: float = 0.5
 
-    db_echo: bool = False
-    db_pool_size: int = 10
-    db_max_overflow: int = 20
-    db_pool_timeout: int = 30
-    db_pool_recycle: int = 1800
-    db_max_retries=3
-    db_retry_backoff=0.5
+    def get_host(self, env_mode: str) -> str:
+        return self.host_docker if env_mode == "docker" else self.host_local
 
-    # ----------------------------
-    # Pydantic configuration
-    # ----------------------------
+    def get_database_url(self, env_mode: str) -> str:
+        host = self.get_host(env_mode)
+        return f"postgresql+asyncpg://{self.user}:{self.password}@{host}:{self.port}/{self.db_name}"
+
+
+# ----------------------------
+# Top-level settings
+# ----------------------------
+class Settings(BaseSettings):
+    app: AppSettings = AppSettings()
+    redis: RedisSettings = RedisSettings()
+    kafka: KafkaSettings = KafkaSettings()
+    postgres: PostgresSettings = PostgresSettings()
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

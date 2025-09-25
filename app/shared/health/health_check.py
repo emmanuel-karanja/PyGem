@@ -8,9 +8,11 @@ import aioredis
 import asyncpg
 
 from app.shared.logger import JohnWickLogger
-from app.config.dependencies import postgres_client
-from app.shared.retry import FixedDelayRetry
+from app.config.settings import Settings
 from app.shared.retry.base import RetryPolicy
+from app.shared.retry import FixedDelayRetry
+
+settings = Settings()
 
 
 class HealthChecker:
@@ -27,8 +29,10 @@ class HealthChecker:
         self.logger = logger
         self.retry_policy: RetryPolicy = retry_policy or FixedDelayRetry(max_retries=3)
 
-    async def check_redis(self, host: str = "127.0.0.1", port: int = 6379) -> Dict[str, Any]:
+    async def check_redis(self) -> Dict[str, Any]:
         """Redis health check using retry policy."""
+        host, port = settings.redis.host, settings.redis.port
+
         async def _check():
             self.logger.info("Checking Redis...")
             r = aioredis.Redis(host=host, port=port, decode_responses=True)
@@ -47,9 +51,11 @@ class HealthChecker:
 
     async def check_postgres(self) -> Dict[str, Any]:
         """Postgres health check using retry policy."""
+        dsn = settings.postgres.get_database_url(settings.app.env_mode)
+
         async def _check():
             self.logger.info("Checking Postgres...")
-            conn = await asyncpg.connect(dsn=str(postgres_client.dsn))
+            conn = await asyncpg.connect(dsn=dsn)
             await conn.close()
             self.logger.info("✅ Postgres healthy")
             return {"status": "healthy", "checked_at": datetime.utcnow().isoformat()}
@@ -60,8 +66,10 @@ class HealthChecker:
             self.logger.warning("Postgres check failed", extra={"error": str(e)})
             return {"status": "unhealthy", "error": str(e), "checked_at": datetime.utcnow().isoformat()}
 
-    async def check_kafka(self, host: str = "localhost", port: int = 9092) -> Dict[str, Any]:
+    async def check_kafka(self) -> Dict[str, Any]:
         """Kafka TCP health check using retry policy."""
+        host, port = settings.kafka.host, settings.kafka.port
+
         async def _check():
             self.logger.info("Checking Kafka...")
             with socket.create_connection((host, port), timeout=5):
