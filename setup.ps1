@@ -1,5 +1,5 @@
 # ----------------------------
-# Modular Monolith Setup Script
+# Modular Monolith Setup Script with Service Readiness
 # ----------------------------
 
 param (
@@ -26,7 +26,6 @@ function Ensure-Python {
         Start-Process -FilePath $pythonInstaller -ArgumentList "/quiet InstallAllUsers=1 PrependPath=1" -Wait
         Remove-Item $pythonInstaller
 
-        # Verify installation
         $version = & $pythonCmd --version 2>$null
         if ($version) {
             Write-Host "✅ Python installed successfully: $version"
@@ -51,7 +50,6 @@ function Setup-Venv {
         Write-Host "✅ Virtual environment already exists"
     }
 
-    # Activate venv for current session
     Write-Host "Activating virtual environment..."
     & "$venvPath\Scripts\Activate.ps1"
 }
@@ -68,7 +66,7 @@ function Install-Dependencies {
 }
 
 # ----------------------------
-# 3️⃣ Start Docker Compose
+# 3️⃣ Start Docker Compose and Wait for Services
 # ----------------------------
 function Start-Docker {
     if (-Not (Get-Command docker -ErrorAction SilentlyContinue)) {
@@ -85,6 +83,67 @@ function Start-Docker {
     Write-Host "Starting Docker containers from $composeFile..."
     docker-compose up -d
     Write-Host "✅ Docker containers started"
+
+    # ----------------------------
+    # 3️⃣a Check PostgreSQL readiness
+    # ----------------------------
+    $maxRetries = 15
+    $retry = 0
+    do {
+        try {
+            docker exec -i $(docker ps -q -f "name=postgres") pg_isready -U postgres
+            Write-Host "✅ PostgreSQL is ready"
+            break
+        } catch {
+            Write-Host "Waiting for PostgreSQL to be ready..."
+            Start-Sleep -Seconds 3
+        }
+        $retry++
+        if ($retry -ge $maxRetries) {
+            Write-Error "❌ PostgreSQL did not become ready in time"
+            exit 1
+        }
+    } while ($true)
+
+    # ----------------------------
+    # 3️⃣b Check Redis readiness
+    # ----------------------------
+    $retry = 0
+    do {
+        try {
+            docker exec -i $(docker ps -q -f "name=redis") redis-cli ping | Select-String "PONG"
+            Write-Host "✅ Redis is ready"
+            break
+        } catch {
+            Write-Host "Waiting for Redis to be ready..."
+            Start-Sleep -Seconds 2
+        }
+        $retry++
+        if ($retry -ge $maxRetries) {
+            Write-Error "❌ Redis did not become ready in time"
+            exit 1
+        }
+    } while ($true)
+
+    # ----------------------------
+    # 3️⃣c Check Kafka readiness
+    # ----------------------------
+    $retry = 0
+    do {
+        try {
+            docker exec -i $(docker ps -q -f "name=kafka") kafka-topics --bootstrap-server localhost:9092 --list
+            Write-Host "✅ Kafka is ready"
+            break
+        } catch {
+            Write-Host "Waiting for Kafka to be ready..."
+            Start-Sleep -Seconds 5
+        }
+        $retry++
+        if ($retry -ge $maxRetries) {
+            Write-Error "❌ Kafka did not become ready in time"
+            exit 1
+        }
+    } while ($true)
 }
 
 # ----------------------------
@@ -113,7 +172,7 @@ switch ($Step.ToLower()) {
     "venv"    { Setup-Venv }
     "deps"    { Setup-Venv; Install-Dependencies }
     "docker"  { Start-Docker }
-    "tests"   { Setup-Venv; Install-Dependencies; Run-Tests }
+    "tests"   { Setup-Venv; Install-Dependencies; Start-Docker; Run-Tests }
     "run"     { Setup-Venv; Install-Dependencies; Start-Docker; Run-Project }
     "all"     { Setup-Venv; Install-Dependencies; Start-Docker; Run-Tests; Run-Project }
     default   { Write-Host "Unknown step. Valid options: venv, deps, docker, tests, run, all" }
