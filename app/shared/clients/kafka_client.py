@@ -11,15 +11,6 @@ from app.shared.metrics.metrics_schema import KafkaMetrics  # ⬅ import schema
 
 
 class KafkaClient:
-    """
-    High-throughput Kafka client with:
-    - Async producer/consumer
-    - Retries with exponential backoff
-    - DLQ support
-    - Metrics tracking
-    - Concurrency control
-    """
-
     def __init__(
         self,
         bootstrap_servers: str,
@@ -36,7 +27,7 @@ class KafkaClient:
         self.dlq_topic = dlq_topic
         self.group_id = group_id
 
-        self.logger: JohnWickLogger = get_logger() or logger or get_logger("KafkaClient")
+        self.logger: JohnWickLogger = logger or get_logger("KafkaClient")
         self.retry_policy = retry_policy or ExponentialBackoffRetry()
         self.batch_size = batch_size
         self.semaphore = asyncio.Semaphore(max_concurrency)
@@ -48,34 +39,40 @@ class KafkaClient:
         self._stop_event = asyncio.Event()
 
     async def start(self) -> None:
-        self.producer = AIOKafkaProducer(bootstrap_servers=self.bootstrap_servers)
-        await self.producer.start()
-
-        self.consumer = AIOKafkaConsumer(
-            self.topic,
-            bootstrap_servers=self.bootstrap_servers,
-            group_id=self.group_id,
-            auto_offset_reset="earliest",
-        )
-        await self.consumer.start()
-        self.logger.info("Kafka client started", extra={"topic": self.topic})
+        try:
+            self.producer = AIOKafkaProducer(bootstrap_servers=self.bootstrap_servers)
+            self.logger.info(self.bootstrap_servers)
+            await self.producer.start()
+            self.consumer = AIOKafkaConsumer(
+                self.topic,
+                bootstrap_servers=self.bootstrap_servers,
+                group_id=self.group_id,
+                auto_offset_reset="earliest",
+            )
+            await self.consumer.start()
+            self.logger.info("Kafka client started", extra={"topic": self.topic})
+        except Exception as e:
+            self.logger.error(f"Failed to start Kafka client: {e}")
+            await self.stop()
+            raise
 
     async def stop(self) -> None:
-        self._stop_event.set()
-        if self._consume_task:
-            await self._consume_task
-        if self.consumer:
-            await self.consumer.stop()
-        if self.producer:
-            await self.producer.stop()
-        self.logger.info("Kafka client stopped")
+        try:
+            self._stop_event.set()
+            if self._consume_task:
+                await self._consume_task
+            if self.consumer:
+                await self.consumer.stop()
+            if self.producer:
+                await self.producer.stop()
+            self.logger.info("Kafka client stopped")
+        except Exception as e:
+            self.logger.exception(f"Error during Kafka client shutdown: {e}")
 
     async def produce(self, key: str, value: dict) -> None:
         async def _send():
             await self.producer.send_and_wait(
-                self.topic,
-                key=key.encode(),
-                value=json.dumps(value).encode(),
+                self.topic, key=key.encode(), value=json.dumps(value).encode()
             )
             self.logger.info("Message produced", extra={"key": key, "value": value})
             self.metrics.increment(KafkaMetrics.PRODUCED)
@@ -87,7 +84,10 @@ class KafkaClient:
                 "Max retries reached, sending to DLQ", extra={"key": key, "value": value}
             )
             self.metrics.increment(KafkaMetrics.FAILED_PRODUCE)
-            await self.send_to_dlq(key, value, "Max retries reached")
+            try:
+                await self.send_to_dlq(key, value, "Max retries reached")
+            except Exception as dlq_err:
+                self.logger.exception(f"Failed to send message to DLQ: {dlq_err}")
         finally:
             self.metrics.report()
 
@@ -101,9 +101,7 @@ class KafkaClient:
 
         async def _send_dlq():
             await self.producer.send_and_wait(
-                self.dlq_topic,
-                key=key.encode(),
-                value=json.dumps(dlq_message).encode(),
+                self.dlq_topic, key=key.encode(), value=json.dumps(dlq_message).encode()
             )
             self.metrics.increment(KafkaMetrics.DLQ)
             self.logger.info("Sent to DLQ", extra=dlq_message)
@@ -111,7 +109,7 @@ class KafkaClient:
         try:
             await self.retry_policy.execute(_send_dlq)
         except Exception:
-            self.logger.error("Failed to send to DLQ after retries", extra=dlq_message)
+            self.logger.exception("Failed to send to DLQ after retries", extra=dlq_message)
         finally:
             self.metrics.report()
 
@@ -122,41 +120,46 @@ class KafkaClient:
             try:
                 await callback(key, value)
                 self.metrics.increment(KafkaMetrics.PROCESSED)
-                self.logger.info(
-                    "Message processed", extra={"key": key, "value": value}
-                )
+                self.logger.info("Message processed", extra={"key": key, "value": value})
             except Exception as exc:
                 self.metrics.increment(KafkaMetrics.FAILED_PROCESS)
                 self.logger.exception(
                     "Processing failed, sending to DLQ",
                     extra={"key": key, "value": value},
                 )
-                await self.send_to_dlq(key, value, str(exc))
+                try:
+                    await self.send_to_dlq(key, value, str(exc))
+                except Exception as dlq_err:
+                    self.logger.exception(f"Failed to send failed message to DLQ: {dlq_err}")
             finally:
                 self.metrics.report()
 
-    async def _consume_loop(
-        self, callback: Callable[[str, dict], Any]
-    ) -> None:
+    async def _consume_loop(self, callback: Callable[[str, dict], Any]) -> None:
         batch = []
-        async for msg in self.consumer:
-            if self._stop_event.is_set():
-                break
+        try:
+            async for msg in self.consumer:
+                if self._stop_event.is_set():
+                    break
 
-            key = msg.key.decode() if msg.key else ""
-            value = json.loads(msg.value.decode())
-            batch.append((key, value))
+                key = msg.key.decode() if msg.key else ""
+                value = json.loads(msg.value.decode())
+                batch.append((key, value))
 
-            if len(batch) >= self.batch_size:
+                if len(batch) >= self.batch_size:
+                    await asyncio.gather(
+                        *[self._process_message(k, v, callback) for k, v in batch]
+                    )
+                    batch.clear()
+
+            if batch:
                 await asyncio.gather(
                     *[self._process_message(k, v, callback) for k, v in batch]
                 )
-                batch.clear()
-
-        if batch:
-            await asyncio.gather(
-                *[self._process_message(k, v, callback) for k, v in batch]
-            )
+        except Exception as e:
+            self.logger.exception(f"Error in consume loop: {e}")
 
     async def consume(self, callback: Callable[[str, dict], Any]) -> None:
-        self._consume_task = asyncio.create_task(self._consume_loop(callback))
+        try:
+            self._consume_task = asyncio.create_task(self._consume_loop(callback))
+        except Exception as e:
+            self.logger.exception(f"Failed to start consume task: {e}")

@@ -5,7 +5,7 @@ from datetime import datetime
 import socket
 
 from app.shared.logger import JohnWickLogger
-from app.config.dependencies import event_bus, postgres_client
+from app.config.dependencies import  postgres_client
 import redis.asyncio as aioredis
 import asyncpg
 

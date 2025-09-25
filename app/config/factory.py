@@ -1,7 +1,8 @@
-from app.config.logger import JohnWickLogger, get_logger
-from app.shared.clients.redis_client import RedisClient
-from app.shared.event_bus.kafka_bus import KafkaEventBus
-from app.shared.event_bus.redis_bus import RedisEventBus
+from app.config.logger import JohnWickLogger, get_logger as base_get_logger
+from app.shared.clients import RedisClient
+from app.shared.clients import KafkaClient
+from app.shared.event_bus import KafkaEventBus
+from app.shared.event_bus import RedisEventBus
 from app.config.settings import Settings
 
 settings = Settings()
@@ -21,19 +22,44 @@ def get_logger(name: str = "app") -> JohnWickLogger:
 # ----------------------------
 def get_redis_client(logger: JohnWickLogger = None) -> RedisClient:
     logger = logger or get_logger("redis_client")
-    get_logger().info(settings.redis_url)
-    return RedisClient(redis_url=settings.redis_url, logger=logger)
+    logger.info(f"Redis URL: {settings.redis_url}")
+    return RedisClient(
+        redis_url=settings.redis_url,
+        max_retries=settings.redis_max_retries,
+        retry_backoff=settings.redis_retry_backoff,
+        logger=logger
+    )
+
+# ----------------------------
+# Kafka client factory
+# ----------------------------
+def get_kafka_client(logger: JohnWickLogger = None):
+    """
+    Returns a KafkaClient instance (producer + consumer, metrics, DLQ, etc.)
+    """
+    logger = logger or get_logger("kafka_client")
+
+    return KafkaClient(
+        bootstrap_servers=settings.kafka_bootstrap_servers,
+        topic=settings.kafka_default_topic,
+        dlq_topic=settings.kafka_dlq_topic,
+        group_id=settings.kafka_group_id,
+        logger=logger,
+        max_concurrency=settings.kafka_max_concurrency,
+        batch_size=settings.kafka_batch_size,
+    )
 
 # ----------------------------
 # Kafka EventBus factory
 # ----------------------------
 def get_kafka_event_bus(logger: JohnWickLogger = None) -> KafkaEventBus:
+    """
+    Returns a KafkaEventBus that wraps a KafkaClient internally.
+    """
     logger = logger or get_logger("kafka_event_bus")
+    kafka_client = get_kafka_client(logger=logger)
     return KafkaEventBus(
-        bootstrap_servers=settings.kafka_bootstrap_servers,
-        group_id=settings.kafka_group_id,
-        dlq_topic=settings.kafka_dlq_topic,  # pass DLQ topic here
-        max_retries=5,
+        kafka_client=kafka_client,
         logger=logger
     )
 
@@ -42,4 +68,8 @@ def get_kafka_event_bus(logger: JohnWickLogger = None) -> KafkaEventBus:
 # ----------------------------
 def get_redis_event_bus(logger: JohnWickLogger = None) -> RedisEventBus:
     logger = logger or get_logger("redis_event_bus")
-    return RedisEventBus(logger=logger)
+    redis_client = get_redis_client(logger=logger)
+    return RedisEventBus(
+        redis_client=redis_client,
+        logger=logger
+    )

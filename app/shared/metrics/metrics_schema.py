@@ -1,3 +1,14 @@
+from enum import Enum
+
+class AppMetrics(str, Enum):
+    API_REQUESTS = "api_requests_total"
+    API_ERRORS = "api_errors_total"
+    KAFKA_PRODUCED = "kafka_messages_produced"
+    KAFKA_FAILED = "kafka_messages_failed"
+    REDIS_PINGS = "redis_health_checks"
+    POSTGRES_PINGS = "postgres_health_checks"
+
+
 class KafkaMetrics:
     """Standard metric keys for KafkaClient"""
     PRODUCED = "produced"

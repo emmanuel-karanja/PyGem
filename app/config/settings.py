@@ -1,6 +1,5 @@
 from pydantic_settings import BaseSettings
-from pydantic import field_validator
-import os
+from pydantic import Field
 
 
 class Settings(BaseSettings):
@@ -17,6 +16,9 @@ class Settings(BaseSettings):
     redis_host_local: str = "127.0.0.1"
     redis_host_docker: str = "pygem_redis"
     redis_port: int = 6379
+
+    redis_max_retries: int = 5
+    redis_retry_backoff: float = 1.0
 
     @property
     def redis_host(self) -> str:
@@ -35,6 +37,10 @@ class Settings(BaseSettings):
     kafka_topic: str = "feature_events"
     kafka_dlq_topic: str = "feature_events_dlq"
     kafka_group_id: str = "feature_group"
+    kafka_default_topic:str="pygem_default"
+
+    kafka_max_concurrency: int = 5
+    kafka_batch_size: int = 10
 
     @property
     def kafka_host(self) -> str:
@@ -42,7 +48,9 @@ class Settings(BaseSettings):
 
     @property
     def kafka_bootstrap_servers(self) -> str:
+        # For local mode, use 127.0.0.1:9092
         return f"{self.kafka_host}:{self.kafka_port}"
+
 
     # ----------------------------
     # Logger

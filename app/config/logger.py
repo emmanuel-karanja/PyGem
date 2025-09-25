@@ -1,4 +1,4 @@
-# app/shared/logger/__init__.py
+# app/shared/logger
 
 import os
 from logging import Logger
