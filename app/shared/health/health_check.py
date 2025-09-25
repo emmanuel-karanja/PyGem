@@ -4,86 +4,75 @@ from typing import Any, Dict, List, Optional
 from datetime import datetime
 import socket
 
-from app.shared.logger import JohnWickLogger
-from app.config.dependencies import  postgres_client
-import redis.asyncio as aioredis
+import aioredis
 import asyncpg
 
-# ----------------------------
-# HealthChecker Class
-# ----------------------------
+from app.shared.logger import JohnWickLogger
+from app.config.dependencies import postgres_client
+from app.shared.retry import FixedDelayRetry
+from app.shared.retry.base import RetryPolicy
+
+
 class HealthChecker:
-    def __init__(self, logger: JohnWickLogger, retries: int = 3, retry_delay: float = 2.0):
+    def __init__(
+        self,
+        logger: JohnWickLogger,
+        retry_policy: Optional[RetryPolicy] = None
+    ):
         """
         Initialize the health checker.
         :param logger: JohnWickLogger instance
-        :param retries: Number of retries per service
-        :param retry_delay: Delay in seconds between retries
+        :param retry_policy: RetryPolicy instance (default FixedDelayRetry)
         """
         self.logger = logger
-        self.retries = retries
-        self.retry_delay = retry_delay
+        self.retry_policy: RetryPolicy = retry_policy or FixedDelayRetry()
 
     async def check_redis(self, host: str = "127.0.0.1", port: int = 6379) -> Dict[str, Any]:
-        """Direct Redis health check without using redis_client"""
-        for attempt in range(1, self.retries + 1):
-            try:
-                self.logger.info(f"Checking Redis (attempt {attempt})...")
-                r = aioredis.Redis(host=host, port=port, decode_responses=True)
-                pong = await r.ping()
-                await r.close()
-                if pong:
-                    self.logger.info("✅ Redis healthy")
-                    return {"status": "healthy", "checked_at": datetime.utcnow().isoformat()}
-            except Exception as e:
-                self.logger.warning(
-                    "Redis check failed", extra={"attempt": attempt, "error": str(e)}
-                )
-                await asyncio.sleep(self.retry_delay)
-        return {
-            "status": "unhealthy",
-            "error": "Cannot connect to Redis",
-            "checked_at": datetime.utcnow().isoformat(),
-        }
+        """Redis health check using retry policy."""
+        async def _check():
+            self.logger.info("Checking Redis...")
+            r = aioredis.Redis(host=host, port=port, decode_responses=True)
+            pong = await r.ping()
+            await r.close()
+            if pong:
+                self.logger.info("✅ Redis healthy")
+                return {"status": "healthy", "checked_at": datetime.utcnow().isoformat()}
+            raise ConnectionError("Redis did not respond to PING")
+
+        try:
+            return await self.retry_policy.execute(_check)
+        except Exception as e:
+            self.logger.warning("Redis check failed", extra={"error": str(e)})
+            return {"status": "unhealthy", "error": str(e), "checked_at": datetime.utcnow().isoformat()}
 
     async def check_postgres(self) -> Dict[str, Any]:
-        """Check PostgreSQL health"""
-        for attempt in range(1, self.retries + 1):
-            try:
-                self.logger.info(f"Checking Postgres (attempt {attempt})...")
-                conn = await asyncpg.connect(dsn=str(postgres_client.dsn))
-                await conn.close()
-                self.logger.info("✅ Postgres healthy")
-                return {"status": "healthy", "checked_at": datetime.utcnow().isoformat()}
-            except Exception as e:
-                self.logger.warning(
-                    "Postgres check failed", extra={"attempt": attempt, "error": str(e)}
-                )
-                await asyncio.sleep(self.retry_delay)
-        return {
-            "status": "unhealthy",
-            "error": "Cannot connect to Postgres",
-            "checked_at": datetime.utcnow().isoformat(),
-        }
+        """Postgres health check using retry policy."""
+        async def _check():
+            self.logger.info("Checking Postgres...")
+            conn = await asyncpg.connect(dsn=str(postgres_client.dsn))
+            await conn.close()
+            self.logger.info("✅ Postgres healthy")
+            return {"status": "healthy", "checked_at": datetime.utcnow().isoformat()}
+
+        try:
+            return await self.retry_policy.execute(_check)
+        except Exception as e:
+            self.logger.warning("Postgres check failed", extra={"error": str(e)})
+            return {"status": "unhealthy", "error": str(e), "checked_at": datetime.utcnow().isoformat()}
 
     async def check_kafka(self, host: str = "localhost", port: int = 9092) -> Dict[str, Any]:
-        """Simple TCP check to Kafka broker"""
-        for attempt in range(1, self.retries + 1):
-            try:
-                self.logger.info(f"Checking Kafka (attempt {attempt})...")
-                with socket.create_connection((host, port), timeout=5):
-                    self.logger.info("✅ Kafka healthy")
-                    return {"status": "healthy", "checked_at": datetime.utcnow().isoformat()}
-            except Exception as e:
-                self.logger.warning(
-                    "Kafka check failed", extra={"attempt": attempt, "error": str(e)}
-                )
-                await asyncio.sleep(self.retry_delay)
-        return {
-            "status": "unhealthy",
-            "error": "Cannot connect to Kafka",
-            "checked_at": datetime.utcnow().isoformat(),
-        }
+        """Kafka TCP health check using retry policy."""
+        async def _check():
+            self.logger.info("Checking Kafka...")
+            with socket.create_connection((host, port), timeout=5):
+                self.logger.info("✅ Kafka healthy")
+                return {"status": "healthy", "checked_at": datetime.utcnow().isoformat()}
+
+        try:
+            return await self.retry_policy.execute(_check)
+        except Exception as e:
+            self.logger.warning("Kafka check failed", extra={"error": str(e)})
+            return {"status": "unhealthy", "error": str(e), "checked_at": datetime.utcnow().isoformat()}
 
     async def run_all(self, services: Optional[List[str]] = None) -> Dict[str, Any]:
         """Run all health checks or a subset of services."""

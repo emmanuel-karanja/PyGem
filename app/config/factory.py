@@ -1,80 +1,95 @@
-from app.config.logger import JohnWickLogger, get_logger as base_get_logger
-from app.shared.clients import RedisClient
-from app.shared.clients import KafkaClient
-from app.shared.event_bus import KafkaEventBus
-from app.shared.event_bus import RedisEventBus
-from app.config.settings import Settings
+from functools import lru_cache
+from app.config.logger import JohnWickLogger, get_logger
+from app.shared.clients import RedisClient, KafkaClient, PostgresClient
+from app.shared.event_bus import KafkaEventBus, RedisEventBus
 from app.shared.metrics.metrics_collector import MetricsCollector
+from app.config.settings import Settings
+from app.shared.retry import ExponentialBackoffRetry
 
 settings = Settings()
 
 # ----------------------------
-# Logger factory
+# Redis client factory
 # ----------------------------
-def get_logger(name: str = "app") -> JohnWickLogger:
-    return JohnWickLogger(
-        name=name,
-        log_file=settings.log_file,
-        level=settings.log_level
+@lru_cache
+def get_redis_client() -> RedisClient:
+    logger = get_logger("redis_client")
+    retry_policy = ExponentialBackoffRetry(
+        max_retries=settings.redis_max_retries,
+        base_delay=settings.redis_retry_backoff
+    )
+    return RedisClient(
+        redis_url=settings.redis_url,
+        logger=logger,
+        retry_policy=retry_policy
     )
 
 # ----------------------------
-# Redis client factory
+# Postgres client factory
 # ----------------------------
-def get_redis_client(logger: JohnWickLogger = None) -> RedisClient:
-    logger = logger or get_logger("redis_client")
-    logger.info(f"Redis URL: {settings.redis_url}")
-    return RedisClient(
-        redis_url=settings.redis_url,
-        max_retries=settings.redis_max_retries,
-        retry_backoff=settings.redis_retry_backoff,
-        logger=logger
+@lru_cache
+def get_postgres_client() -> PostgresClient:
+    logger = get_logger("postgres_client")
+    retry_policy = ExponentialBackoffRetry(
+        max_retries=settings.db_max_retries,
+        base_delay=settings.db_retry_backoff
+    )
+    return PostgresClient(
+        dsn=settings.db_dsn,
+        logger=logger,
+        retry_policy=retry_policy
     )
 
 # ----------------------------
 # Kafka client factory
 # ----------------------------
-def get_kafka_client(logger: JohnWickLogger = None):
-    """
-    Returns a KafkaClient instance (producer + consumer, metrics, DLQ, etc.)
-    """
-    logger = logger or get_logger("kafka_client")
-
+@lru_cache
+def get_kafka_client() -> KafkaClient:
+    logger = get_logger("kafka_client")
+    retry_policy = ExponentialBackoffRetry(
+        max_retries=settings.kafka_max_retries,
+        base_delay=settings.kafka_retry_backoff
+    )
     return KafkaClient(
         bootstrap_servers=settings.kafka_bootstrap_servers,
         topic=settings.kafka_default_topic,
         dlq_topic=settings.kafka_dlq_topic,
         group_id=settings.kafka_group_id,
         logger=logger,
+        retry_policy=retry_policy,
         max_concurrency=settings.kafka_max_concurrency,
         batch_size=settings.kafka_batch_size,
     )
 
 # ----------------------------
-# Kafka EventBus factory
+# Redis EventBus factory
 # ----------------------------
-def get_kafka_event_bus(logger: JohnWickLogger = None) -> KafkaEventBus:
-    """
-    Returns a KafkaEventBus that wraps a KafkaClient internally.
-    """
-    logger = logger or get_logger("kafka_event_bus")
+@lru_cache
+def get_redis_event_bus() -> RedisEventBus:
+    logger = get_logger("redis_event_bus")
     metrics = MetricsCollector(logger=logger)
-    kafka_client = get_kafka_client(logger=logger)
-    return KafkaEventBus(
-        kafka_client=kafka_client,
+    return RedisEventBus(
+        redis_client=get_redis_client(),
         logger=logger,
+        retry_policy=ExponentialBackoffRetry(
+        max_retries=settings.redis_max_retries,
+        base_delay=settings.redis_retry_backoff),
         metrics=metrics
     )
 
 # ----------------------------
-# Redis EventBus factory (optional)
+# Kafka EventBus factory
 # ----------------------------
-def get_redis_event_bus(logger: JohnWickLogger = None) -> RedisEventBus:
-    logger = logger or get_logger("redis_event_bus")
+@lru_cache
+def get_kafka_event_bus() -> KafkaEventBus:
+    logger = get_logger("kafka_event_bus")
     metrics = MetricsCollector(logger=logger)
-    redis_client = get_redis_client(logger=logger)
-    return RedisEventBus(
-        redis_client=redis_client,
+    return KafkaEventBus(
+        kafka_client=get_kafka_client(),
         logger=logger,
-        metrics=metrics
+        metrics=metrics,
+        retry_policy = ExponentialBackoffRetry(
+        max_retries=settings.kafka_max_retries,
+        base_delay=settings.kafka_retry_backoff
+    )
     )

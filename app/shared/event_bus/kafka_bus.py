@@ -3,6 +3,7 @@ from typing import Callable, Dict, Optional
 from app.shared.clients import KafkaClient
 from app.config.logger import JohnWickLogger, get_logger
 from app.shared.metrics.metrics_collector import MetricsCollector
+from app.shared.retry import RetryPolicy,FixedDelayRetry
 
 
 class KafkaEventBus:
@@ -15,7 +16,8 @@ class KafkaEventBus:
         self,
         kafka_client: Optional[KafkaClient] = None,
         logger: Optional[JohnWickLogger] = None,
-        metrics: Optional[MetricsCollector] = None
+        metrics: Optional[MetricsCollector] = None,
+        retry_policy: Optional[RetryPolicy] = None,
     ):
         self.logger: JohnWickLogger = logger or get_logger("KafkaEventBus")
         self.kafka_client: KafkaClient = kafka_client or KafkaClient(
@@ -33,6 +35,9 @@ class KafkaEventBus:
 
         # Metrics (optional)
         self.metrics: Optional[MetricsCollector] = metrics or self.kafka_client.metrics
+
+        # Retry policy (optional)
+        self.retry_policy: Optional[RetryPolicy] = retry_policy or FixedDelayRetry()
 
     async def start(self):
         """Start Kafka producer and consumer"""
@@ -56,12 +61,23 @@ class KafkaEventBus:
         Automatically uses the client's topic if none is provided.
         """
         target_topic = topic or self.kafka_client.topic
-        try:
+
+        async def _publish():
             await self.kafka_client.produce(key, payload)
+
+        try:
+            if self.retry_policy:
+                await self.retry_policy.execute(_publish)
+            else:
+                await _publish()
+
             if self.metrics:
                 await self.metrics.increment("published")
         except Exception as exc:
-            self.logger.error("Failed to publish message", extra={"key": key, "topic": target_topic, "error": str(exc)})
+            self.logger.error(
+                "Failed to publish message",
+                extra={"key": key, "topic": target_topic, "error": str(exc)},
+            )
             if self.metrics:
                 await self.metrics.increment("failed_publish")
             raise
@@ -76,18 +92,29 @@ class KafkaEventBus:
                 async def dispatch(key: str, value: dict):
                     # Fire-and-forget: each subscriber callback runs in its own async task
                     for cb in self.subscribers.get(topic, []):
-                        try:
-                            asyncio.create_task(cb(key, value))
-                        except Exception as exc:
-                            self.logger.exception("Subscriber callback failed", extra={"error": str(exc)})
-                            if self.metrics:
-                                await self.metrics.increment("failed_consume")
+                        async def _cb():
+                            try:
+                                await cb(key, value)
+                            except Exception as exc:
+                                self.logger.exception(
+                                    "Subscriber callback failed", extra={"error": str(exc)}
+                                )
+                                if self.metrics:
+                                    await self.metrics.increment("failed_consume")
+
+                        if self.retry_policy:
+                            asyncio.create_task(self.retry_policy.execute(_cb))
+                        else:
+                            asyncio.create_task(_cb())
 
                     if self.metrics:
                         await self.metrics.increment("consumed")
 
                 try:
-                    await self.kafka_client.consume(dispatch)
+                    if self.retry_policy:
+                        await self.retry_policy.execute(lambda: self.kafka_client.consume(dispatch))
+                    else:
+                        await self.kafka_client.consume(dispatch)
                 except Exception as exc:
                     self.logger.exception("Consume loop failed", extra={"error": str(exc)})
 

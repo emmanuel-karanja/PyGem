@@ -41,6 +41,8 @@ class Settings(BaseSettings):
 
     kafka_max_concurrency: int = 5
     kafka_batch_size: int = 10
+    kafka_max_retries=5
+    kafka_retry_backoff=1.0
 
     @property
     def kafka_host(self) -> str:
@@ -81,6 +83,8 @@ class Settings(BaseSettings):
     db_max_overflow: int = 20
     db_pool_timeout: int = 30
     db_pool_recycle: int = 1800
+    db_max_retries=3
+    db_retry_backoff=0.5
 
     # ----------------------------
     # Pydantic configuration
