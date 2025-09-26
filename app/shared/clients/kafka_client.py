@@ -9,6 +9,7 @@ from app.shared.logger import JohnWickLogger
 from app.shared.metrics.metrics_collector import MetricsCollector
 from app.shared.retry.base import RetryPolicy
 from app.shared.retry.fixed_delay_retry import FixedDelayRetry
+from app.shared.metrics.metrics_schema import KafkaMetrics
 
 
 @ApplicationScoped
@@ -43,6 +44,7 @@ class KafkaClient:
     # --- Lifecycle ---
     async def start(self):
         """Start producer and consumer."""
+        # Prevents trying to start the connection more than once at the same time.
         async with self._start_lock:
             if self._running:
                 return
@@ -53,6 +55,7 @@ class KafkaClient:
                 self.logger.info("Kafka Producer started", extra={"bootstrap_servers": self.bootstrap_servers})
 
             async def _start_consumer():
+                # Start consuming only if there are any topics present
                 if self.topics:
                     self._consumer = AIOKafkaConsumer(
                         *self.topics,
@@ -96,7 +99,7 @@ class KafkaClient:
         async def _produce():
             payload_bytes = json.dumps(value).encode("utf-8")
             await self._producer.send_and_wait(topic, payload_bytes, key=key.encode())
-            self.metrics.increment("kafka_produce")
+            self.metrics.increment(KafkaMetrics.PRODUCED)
             self.logger.info("Message produced", extra={"topic": topic, "key": key, "value": value})
 
         try:
@@ -106,10 +109,11 @@ class KafkaClient:
                 "Failed to produce message",
                 extra={"topic": topic, "key": key, "value": value, "error": str(e)},
             )
-            self.metrics.increment("kafka_failed_produce")
+            self.metrics.increment(KafkaMetrics.FAILED_PRODUCE)
             raise
 
     # --- Consume ---
+    # yield messages one by one
     async def consume(self) -> AsyncIterator[Tuple[str, str, dict]]:
         """Async generator yielding messages as (topic, key, value)."""
         if not self._running:
@@ -118,18 +122,25 @@ class KafkaClient:
             raise RuntimeError("Kafka consumer not initialized")
 
         try:
+            # Async iteration over the messages in the consumer
+            # This avoids the weird, complex,spaghettish code from earlier. My lord, I am getting a headache thinking about it
+            # Backpressure friendly – Your loop only consumes when ready, doesn’t overwhelm downstream systems.
+            # Cancel-friendly – You can stop consuming gracefully with asyncio.CancelledError.
+            # Composable – Can combine multiple async iterators (e.g., consume from multiple topics or Kafka + HTTP stream) 
+            #  using asyncio.gather or asyncio.create_task.
+            # Metrics & logging integration – You can increment metrics inside the loop per message naturally.
             async for msg in self._consumer:
                 key = msg.key.decode() if msg.key else "default"
                 value = json.loads(msg.value)
                 self.logger.info(f"Consumed message from kafka: {msg.topic}:{value}")
-                self.metrics.increment("kafka_consume")
+                self.metrics.increment(KafkaMetrics.PROCESSED)
                 yield msg.topic, key, value
         except asyncio.CancelledError:
             self.logger.info("Kafka consume task cancelled")
             return
         except Exception as e:
             self.logger.error("Kafka consume error", extra={"error": str(e)})
-            self.metrics.increment("kafka_failed_consume")
+            self.metrics.increment(KafkaMetrics.FAILED_PROCESS)
             raise
 
     async def subscribe_to_topics(self, topics: List[str]):
