@@ -7,6 +7,7 @@ class AppMetrics(str, Enum):
     KAFKA_FAILED = "kafka_messages_failed"
     REDIS_PINGS = "redis_health_checks"
     POSTGRES_PINGS = "postgres_health_checks"
+    PING = "ping"
 
 
 class KafkaMetrics:
@@ -16,6 +17,7 @@ class KafkaMetrics:
     DLQ = "dlq"
     PROCESSED = "processed"
     FAILED_PROCESS = "failed_process"
+    PING = "ping"
 
 
 class RedisMetrics:
@@ -28,3 +30,4 @@ class RedisMetrics:
     FAILED_GET = "redis_failed_get"
     FAILED_DEL = "redis_failed_del"
     FAILED_EXISTS = "redis_failed_exists"
+    PING = "ping"

@@ -15,7 +15,20 @@ import asyncio
 settings = Settings()
 app = FastAPI(title="Modular Monolith FastAPI App")
 
+# ----------------------------
+# Test endpoint
+# ----------------------------
+@app.get("/ping")
+async def ping():
+    """
+    Simple test endpoint to verify the server is running.
+    """
+    logger.info("🏓 Ping endpoint hit")
+    return {"status": "ok", "message": "pong"}
+
+# ----------------------------
 # Include the health check routes
+# ----------------------------
 app.include_router(health_router)
 logger.info("✅ Health routes initialized")
 
@@ -41,7 +54,10 @@ async def startup_event():
     )
 
     # Initialize DB
-    await init_db(str(settings.postgres.get_database_url(settings.app.env_mode, for_asyncpg=False)), app_path="app")
+    await init_db(
+        str(settings.postgres.get_database_url(settings.app.env_mode, for_asyncpg=False)),
+        app_path="app"
+    )
     logger.info("✅ Application startup complete")
 
 # ----------------------------
