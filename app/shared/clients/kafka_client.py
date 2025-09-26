@@ -73,7 +73,7 @@ class KafkaClient:
         """Stop all tasks, producer, and consumer safely without hanging."""
         self._stop_event.set()
 
-        # Cancel the consume task, but don't block indefinitely
+        # --- Cancel consume loop safely ---
         if self._consume_task:
             self._consume_task.cancel()
             try:
@@ -82,32 +82,32 @@ class KafkaClient:
                 self.logger.warning("Consume task did not stop in time, continuing shutdown")
             except asyncio.CancelledError:
                 self.logger.debug("Consume loop cancelled")
+            except Exception as e:
+                self.logger.error(f"Error while cancelling consume task: {e}")
+            finally:
+                self._consume_task = None
 
-        # Stop producer safely
+        # --- Stop producer ---
         if self.producer:
             try:
-                await self.producer.stop()
+                await asyncio.wait_for(self.producer.stop(), timeout=2.0)
+            except asyncio.TimeoutError:
+                self.logger.warning("Producer.stop() timed out")
             except Exception as e:
                 self.logger.warning(f"Error stopping producer: {e}")
-            try:
-                await self.producer.close()
-            except Exception as e:
-                self.logger.warning(f"Error closing producer: {e}")
+            finally:
+                self.producer = None
 
-        # Stop consumer safely
+        # --- Stop consumer ---
         if self.consumer:
             try:
-                await self.consumer.stop()
+                await asyncio.wait_for(self.consumer.stop(), timeout=2.0)
+            except asyncio.TimeoutError:
+                self.logger.warning("Consumer.stop() timed out")
             except Exception as e:
                 self.logger.warning(f"Error stopping consumer: {e}")
-            try:
-                await self.consumer.close()
-            except Exception as e:
-                self.logger.warning(f"Error closing consumer: {e}")
-
-        self._consume_task = None
-        self.producer = None
-        self.consumer = None
+            finally:
+                self.consumer = None
 
         self.logger.info("Kafka client stopped safely")
 
