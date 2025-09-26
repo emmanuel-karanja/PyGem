@@ -24,7 +24,7 @@ class RedisEventBus(EventBus):
         retry_policy: Optional[RetryPolicy] = None,
     ):
         self.logger = logger or JohnWickLogger(name="RedisEventBus")
-        self.redis_client = redis_client or RedisClient(logger=self.logger)
+        self.redis_client = redis_client
 
         # Channel -> list of subscriber callbacks
         self.subscribers: Dict[str, List[Callable]] = {}

@@ -1,7 +1,7 @@
 import asyncio
 import json
 import time
-from typing import Callable, Any, Optional, Dict
+from typing import Callable, Any, Optional
 from aiokafka import AIOKafkaProducer, AIOKafkaConsumer
 
 from app.shared.logger import JohnWickLogger
@@ -45,29 +45,28 @@ class KafkaClient:
     # Startup / Shutdown
     # ----------------------------
     async def start(self):
-        """Start producer and consumer."""
-        try:
-            self.producer = AIOKafkaProducer(bootstrap_servers=self.bootstrap_servers)
-            await self.producer.start()
+        from aiokafka import AIOKafkaProducer, AIOKafkaConsumer
 
-            self.consumer = AIOKafkaConsumer(
-                self.topic,
-                bootstrap_servers=self.bootstrap_servers,
-                group_id=self.group_id,
-                auto_offset_reset="earliest",
-            )
+        self.producer = AIOKafkaProducer(bootstrap_servers=self.bootstrap_servers)
+        self.consumer = AIOKafkaConsumer(
+            self.topic,
+            bootstrap_servers=self.bootstrap_servers,
+            group_id=self.group_id
+        )
+
+        try:
+            await self.producer.start()
             await self.consumer.start()
 
-            self.logger.info(
-                "Kafka client started",
-                extra={"topic": self.topic, "bootstrap_servers": self.bootstrap_servers},
-            )
-        except Exception as e:
-            self.logger.error(
-                f"Failed to start Kafka client: {e}",
-                extra={"topic": self.topic}
-            )
-            raise
+            self.logger.info("Kafka service started")
+        except asyncio.CancelledError as ce:
+            self.logger.warning("Startup cancelled, cleaning up Kafka client...")
+            # ensure cleanup if Ctrl+C during startup
+            if self.producer:
+                await self.producer.stop()
+            if self.consumer:
+                await self.consumer.stop()
+            raise ce
 
     async def stop(self):
         """Stop all tasks, producer, and consumer safely without hanging."""
@@ -87,23 +86,24 @@ class KafkaClient:
             finally:
                 self._consume_task = None
 
-        # --- Stop producer ---
+        # --- Stop producer safely (flush before stop) ---
         if self.producer:
             try:
+                await asyncio.wait_for(self.producer.flush(), timeout=2.0)
                 await asyncio.wait_for(self.producer.stop(), timeout=2.0)
             except asyncio.TimeoutError:
-                self.logger.warning("Producer.stop() timed out")
+                self.logger.warning("Producer stop timed out")
             except Exception as e:
                 self.logger.warning(f"Error stopping producer: {e}")
             finally:
                 self.producer = None
 
-        # --- Stop consumer ---
+        # --- Stop consumer safely ---
         if self.consumer:
             try:
                 await asyncio.wait_for(self.consumer.stop(), timeout=2.0)
             except asyncio.TimeoutError:
-                self.logger.warning("Consumer.stop() timed out")
+                self.logger.warning("Consumer stop timed out")
             except Exception as e:
                 self.logger.warning(f"Error stopping consumer: {e}")
             finally:
@@ -125,9 +125,9 @@ class KafkaClient:
 
         try:
             await self.retry_policy.execute(_send)
-        except asyncio.CancelledError:
+        except asyncio.CancelledError as ce:
             self.logger.warning("Task cancelled during produce", extra={"topic": self.topic})
-            raise
+            raise ce
         except Exception:
             self.logger.error("Max retries reached, sending to DLQ", extra={"key": key, "value": value, "topic": self.topic})
             self.metrics.increment(KafkaMetrics.FAILED_PRODUCE)
@@ -191,10 +191,14 @@ class KafkaClient:
                     await asyncio.gather(*[self._process_message(k, v, callback) for k, v in batch])
                     batch.clear()
 
+            # Flush leftover batch before exiting
             if batch:
                 await asyncio.gather(*[self._process_message(k, v, callback) for k, v in batch])
 
         except asyncio.CancelledError:
+            # Process leftover batch on cancellation
+            if batch:
+                await asyncio.gather(*[self._process_message(k, v, callback) for k, v in batch])
             self.logger.debug("Consume loop cancelled", extra={"topic": self.topic})
         except Exception as e:
             self.logger.exception(f"Error in consume loop: {e}", extra={"topic": self.topic})

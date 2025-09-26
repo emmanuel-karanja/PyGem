@@ -36,10 +36,11 @@ class RedisClient:
 
         try:
             await self.retry_policy.execute(_connect)
-        except asyncio.CancelledError:
+        except asyncio.CancelledError as ce:
             self.logger.warning("Task was cancelled, cleaning up...")
             # Optional: close connections, unsubscribe, flush metrics
-            raise
+            raise ce
+            
         except Exception:
             self.logger.error("Failed to connect to Redis after retries", extra={"redis_url": self.redis_url})
             raise ConnectionError(f"Cannot connect to Redis at {self.redis_url}")
@@ -76,11 +77,11 @@ class RedisClient:
 
         try:
             await self.retry_policy.execute(_set)
-        except Exception:
+        except Exception as e:
             self.logger.error("Redis SET failed after retries", extra={"key": key, "value": value})
             self.metrics.increment(RedisMetrics.FAILED_SET)
             self.metrics.report()
-            raise
+            raise e
 
     async def get(self, key: str) -> Any:
         if self.redis is None:

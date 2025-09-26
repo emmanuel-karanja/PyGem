@@ -21,13 +21,7 @@ class KafkaEventBus:
         retry_policy: Optional[RetryPolicy] = None,
     ):
         self.logger= logger or JohnWickLogger(name="KafkaEventBus")
-        self.kafka_client: KafkaClient = kafka_client or KafkaClient(
-            bootstrap_servers="localhost:9092",
-            topic="default",
-            dlq_topic="dlq",
-            group_id="eventbus-group",
-            logger=self.logger,
-        )
+        self.kafka_client: KafkaClient = kafka_client
 
         # topic -> list of subscriber callbacks
         self.subscribers: Dict[str, list[Callable[[str, dict], None]]] = {}
