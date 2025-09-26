@@ -8,7 +8,7 @@ from app.shared.logger import JohnWickLogger
 from app.shared.metrics.metrics_collector import MetricsCollector
 from app.shared.retry.base import RetryPolicy
 from app.shared.retry.fixed_delay_retry import FixedDelayRetry
-from annotations import ApplicationScoped
+from app.shared.annotations import ApplicationScoped
 
 
 @ApplicationScoped
@@ -49,15 +49,17 @@ class RedisEventBus(EventBus):
         if not self._running:
             return
 
+        # cancel subscriber callback tasks
         for tasks in self._subscriber_tasks.values():
             for task in tasks:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
         self._subscriber_tasks.clear()
 
+        # cancel consume loops
         for task in self._consume_tasks.values():
             task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
+        await asyncio.gather(*self._consume_tasks.values(), return_exceptions=True)
         self._consume_tasks.clear()
 
         await self.redis_client.close()
@@ -68,27 +70,25 @@ class RedisEventBus(EventBus):
         if not self._running:
             await self.start()
 
-    def on(self, channel: str, callback: Callable[[dict], Awaitable[None]]):
+    async def subscribe(self, channel: str, callback: Callable[[dict], Awaitable[None]]):
         """Subscribe to a channel (auto-starts)."""
+        await self._ensure_started()
 
-        async def _setup():
-            await self._ensure_started()
-            self.subscribers.setdefault(channel, []).append(callback)
-            if channel not in self._consume_tasks:
-                self._consume_tasks[channel] = asyncio.create_task(
-                    self._consume_loop(channel)
-                )
+        self.subscribers.setdefault(channel, []).append(callback)
 
-        asyncio.create_task(_setup())
-       
-    #Alias
-    subscribe = on
+        if channel not in self._consume_tasks:
+            self._consume_tasks[channel] = asyncio.create_task(
+                self._consume_loop(channel)
+            )
 
-    async def emit(self, channel: str, payload: dict):
+        self.logger.info("Subscription registered", extra={"channel": channel})
+
+    async def publish(self, channel: str, payload: dict):
         """Publish an event to Redis (auto-starts)."""
         await self._ensure_started()
 
         async def _publish():
+            self.logger.info(f"Publishing message to redis:{channel}: {payload}")
             await self.redis_client.redis.publish(channel, json.dumps(payload))
 
         try:
@@ -102,39 +102,69 @@ class RedisEventBus(EventBus):
             raise
 
     async def _consume_loop(self, channel: str):
-        await self.redis_client.connect()
-        pubsub = self.redis_client.redis.pubsub()
-        await pubsub.subscribe(channel)
-        self.logger.info("Subscribed", extra={"channel": channel})
+        """
+        Consume messages from a Redis channel.
+        If the connection drops, automatically attempts to reconnect using retry_policy.
+        """
+        while self._running:
+            try:
+                pubsub = self.redis_client.redis.pubsub()
+                await pubsub.subscribe(channel)
+                self.logger.info("Subscribed", extra={"channel": channel})
 
-        try:
-            async for message in pubsub.listen():
-                if message["type"] != "message":
-                    continue
-                payload = json.loads(message["data"])
+                async for message in pubsub.listen():
+                    if not self._running:
+                        break
+                    if message["type"] != "message":
+                        continue
 
-                tasks = set()
-                for cb in self.subscribers.get(channel, []):
-                    async def _cb():
-                        try:
-                            await cb(payload)
-                        except Exception as exc:
-                            self.logger.exception("Subscriber failed", extra={"error": str(exc)})
-                            if self.metrics:
-                                self.metrics.increment("failed_consume")
+                    payload = json.loads(message["data"])
 
-                    task = asyncio.create_task(self.retry_policy.execute(_cb))
-                    tasks.add(task)
-                    task.add_done_callback(lambda t: tasks.discard(t))
+                    tasks = set()
+                    for cb in self.subscribers.get(channel, []):
+                        async def _cb(cb=cb):
+                            try:
+                                await cb(payload)
+                            except Exception as exc:
+                                self.logger.exception(
+                                    "Subscriber failed", extra={"error": str(exc)}
+                                )
+                                if self.metrics:
+                                    self.metrics.increment("failed_consume")
 
-                self._subscriber_tasks.setdefault(channel, set()).update(tasks)
+                        task = asyncio.create_task(self.retry_policy.execute(_cb))
+                        tasks.add(task)
+                        task.add_done_callback(lambda t: tasks.discard(t))
 
-                if self.metrics:
-                    self.metrics.increment("consumed")
+                    if tasks:
+                        self._subscriber_tasks.setdefault(channel, set()).update(tasks)
 
-        except asyncio.CancelledError:
-            self.logger.debug(f"Consume loop for {channel} cancelled")
-            raise
-        finally:
-            await pubsub.unsubscribe(channel)
-            await pubsub.close()
+                    if self.metrics:
+                        self.metrics.increment("consumed")
+
+            except asyncio.CancelledError:
+                self.logger.debug(f"Consume loop for {channel} cancelled")
+                break
+            except Exception as exc:
+                self.logger.warning(
+                    f"Consume loop error for channel={channel}, retrying...",
+                    extra={"error": str(exc)},
+                )
+                # attempt reconnect with retry policy
+                async def _reconnect():
+                    await self.redis_client.connect()
+
+                try:
+                    await self.retry_policy.execute(_reconnect)
+                except Exception:
+                    self.logger.error("Reconnect failed, stopping consumer")
+                    break
+                # small backoff before retrying
+                await asyncio.sleep(1)
+            finally:
+                try:
+                    if "pubsub" in locals():
+                        await pubsub.unsubscribe(channel)
+                        await pubsub.close()
+                except Exception:
+                    pass

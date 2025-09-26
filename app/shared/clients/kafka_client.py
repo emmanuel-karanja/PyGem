@@ -1,212 +1,142 @@
 import asyncio
 import json
-import time
-from typing import Callable, Any, Optional
+from typing import Optional, List, AsyncIterator, Tuple
+
 from aiokafka import AIOKafkaProducer, AIOKafkaConsumer
 
+from app.shared.annotations.core import ApplicationScoped
 from app.shared.logger import JohnWickLogger
 from app.shared.metrics.metrics_collector import MetricsCollector
-from app.shared.metrics.metrics_schema import KafkaMetrics
 from app.shared.retry.base import RetryPolicy
 from app.shared.retry.fixed_delay_retry import FixedDelayRetry
 
 
+@ApplicationScoped
 class KafkaClient:
-    """Async Kafka client with producer, consumer, DLQ, metrics, and concurrency control."""
+    """Async Kafka client with retries, metrics, JSON support, and optional topic subscription."""
 
     def __init__(
         self,
         bootstrap_servers: str,
-        topic: str,
-        dlq_topic: str,
-        group_id: str,
+        group_id: str = "default-group",
+        topics: Optional[List[str]] = None,
+        dlq_topic: Optional[str] = None,
         logger: Optional[JohnWickLogger] = None,
+        metrics: Optional[MetricsCollector] = None,
         retry_policy: Optional[RetryPolicy] = None,
         max_concurrency: int = 5,
-        batch_size: int = 10,
     ):
         self.bootstrap_servers = bootstrap_servers
-        self.topic = topic
-        self.dlq_topic = dlq_topic
         self.group_id = group_id
+        self.topics = topics or []
+        self.dlq_topic = dlq_topic
+        self.logger = logger or JohnWickLogger("KafkaClient")
+        self.metrics = metrics or MetricsCollector(self.logger)
+        self.retry_policy: RetryPolicy = retry_policy or FixedDelayRetry(max_retries=3)
+        self.max_concurrency = max_concurrency
 
-        self.logger = logger or JohnWickLogger(name="KafkaClient")
-        self.retry_policy = retry_policy or FixedDelayRetry(max_retries=3)
-        self.semaphore = asyncio.Semaphore(max_concurrency)
-        self.batch_size = batch_size
-        self.metrics = MetricsCollector(self.logger)
+        self._producer: Optional[AIOKafkaProducer] = None
+        self._consumer: Optional[AIOKafkaConsumer] = None
+        self._running = False
+        self._start_lock = asyncio.Lock()
 
-        self.producer: Optional[AIOKafkaProducer] = None
-        self.consumer: Optional[AIOKafkaConsumer] = None
-        self._consume_task: Optional[asyncio.Task] = None
-        self._stop_event = asyncio.Event()
-
-    # ----------------------------
-    # Startup / Shutdown
-    # ----------------------------
+    # --- Lifecycle ---
     async def start(self):
-        from aiokafka import AIOKafkaProducer, AIOKafkaConsumer
+        """Start producer and consumer."""
+        async with self._start_lock:
+            if self._running:
+                return
 
-        self.producer = AIOKafkaProducer(bootstrap_servers=self.bootstrap_servers)
-        self.consumer = AIOKafkaConsumer(
-            self.topic,
-            bootstrap_servers=self.bootstrap_servers,
-            group_id=self.group_id
-        )
+            async def _start_producer():
+                self._producer = AIOKafkaProducer(bootstrap_servers=self.bootstrap_servers)
+                await self._producer.start()
+                self.logger.info("Kafka Producer started", extra={"bootstrap_servers": self.bootstrap_servers})
 
-        try:
-            await self.producer.start()
-            await self.consumer.start()
+            async def _start_consumer():
+                if self.topics:
+                    self._consumer = AIOKafkaConsumer(
+                        *self.topics,
+                        bootstrap_servers=self.bootstrap_servers,
+                        group_id=self.group_id,
+                        auto_offset_reset="earliest",
+                    )
+                    await self._consumer.start()
+                    self.logger.info(
+                        "Kafka Consumer started", extra={"group_id": self.group_id, "topics": self.topics}
+                    )
 
-            self.logger.info("Kafka service started")
-        except asyncio.CancelledError as ce:
-            self.logger.warning("Startup cancelled, cleaning up Kafka client...")
-            # ensure cleanup if Ctrl+C during startup
-            if self.producer:
-                await self.producer.stop()
-            if self.consumer:
-                await self.consumer.stop()
-            raise ce
+            try:
+                await self.retry_policy.execute(_start_producer)
+                await self.retry_policy.execute(_start_consumer)
+                self._running = True
+            except Exception as e:
+                self.logger.error("Failed to start KafkaClient", extra={"error": str(e)})
+                raise
 
     async def stop(self):
-        """Stop all tasks, producer, and consumer safely without hanging."""
-        self._stop_event.set()
+        """Stop producer and consumer."""
+        if not self._running:
+            return
 
-        # --- Cancel consume loop safely ---
-        if self._consume_task:
-            self._consume_task.cancel()
-            try:
-                await asyncio.wait_for(self._consume_task, timeout=2.0)
-            except asyncio.TimeoutError:
-                self.logger.warning("Consume task did not stop in time, continuing shutdown")
-            except asyncio.CancelledError:
-                self.logger.debug("Consume loop cancelled")
-            except Exception as e:
-                self.logger.error(f"Error while cancelling consume task: {e}")
-            finally:
-                self._consume_task = None
+        if self._consumer:
+            await self._consumer.stop()
+            self.logger.info("Kafka Consumer stopped")
+        if self._producer:
+            await self._producer.stop()
+            self.logger.info("Kafka Producer stopped")
 
-        # --- Stop producer safely (flush before stop) ---
-        if self.producer:
-            try:
-                await asyncio.wait_for(self.producer.flush(), timeout=2.0)
-                await asyncio.wait_for(self.producer.stop(), timeout=2.0)
-            except asyncio.TimeoutError:
-                self.logger.warning("Producer stop timed out")
-            except Exception as e:
-                self.logger.warning(f"Error stopping producer: {e}")
-            finally:
-                self.producer = None
+        self._running = False
 
-        # --- Stop consumer safely ---
-        if self.consumer:
-            try:
-                await asyncio.wait_for(self.consumer.stop(), timeout=2.0)
-            except asyncio.TimeoutError:
-                self.logger.warning("Consumer stop timed out")
-            except Exception as e:
-                self.logger.warning(f"Error stopping consumer: {e}")
-            finally:
-                self.consumer = None
+    # --- Produce ---
+    async def produce(self, topic: str, value: dict, key: str = "default"):
+        """Publish message to Kafka with JSON encoding and retry."""
+        if not self._running:
+            await self.start()
 
-        self.logger.info("Kafka client stopped safely")
-
-    # ----------------------------
-    # Produce / DLQ
-    # ----------------------------
-    async def produce(self, key: str, value: dict):
-        """Produce message with retry and DLQ fallback."""
-        async def _send():
-            await self.producer.send_and_wait(
-                self.topic, key=key.encode(), value=json.dumps(value).encode()
-            )
-            self.logger.info("Message produced", extra={"key": key, "value": value, "topic": self.topic})
-            self.metrics.increment(KafkaMetrics.PRODUCED)
+        async def _produce():
+            payload_bytes = json.dumps(value).encode("utf-8")
+            await self._producer.send_and_wait(topic, payload_bytes, key=key.encode())
+            self.metrics.increment("kafka_produce")
+            self.logger.info("Message produced", extra={"topic": topic, "key": key, "value": value})
 
         try:
-            await self.retry_policy.execute(_send)
-        except asyncio.CancelledError as ce:
-            self.logger.warning("Task cancelled during produce", extra={"topic": self.topic})
-            raise ce
-        except Exception:
-            self.logger.error("Max retries reached, sending to DLQ", extra={"key": key, "value": value, "topic": self.topic})
-            self.metrics.increment(KafkaMetrics.FAILED_PRODUCE)
-            await self.send_to_dlq(key, value, "Max retries reached")
-        finally:
-            self.metrics.report()
-
-    async def send_to_dlq(self, key: str, value: dict, reason: str):
-        """Send failed message to DLQ."""
-        dlq_message = {
-            "original_key": key,
-            "original_value": value,
-            "reason": reason,
-            "timestamp": int(time.time()),
-        }
-
-        async def _send_dlq():
-            await self.producer.send_and_wait(
-                self.dlq_topic, key=key.encode(), value=json.dumps(dlq_message).encode()
-            )
-            self.metrics.increment(KafkaMetrics.DLQ)
-            self.logger.info("Sent to DLQ", extra={"dlq_message": dlq_message, "topic": self.topic})
-
-        try:
-            await self.retry_policy.execute(_send_dlq)
-        except Exception:
-            self.logger.exception("Failed to send to DLQ after retries", extra={"dlq_message": dlq_message, "topic": self.topic})
-        finally:
-            self.metrics.report()
-
-    # ----------------------------
-    # Consume
-    # ----------------------------
-    async def _process_message(self, key: str, value: dict, callback: Callable[[str, dict], Any]):
-        """Process a single message with semaphore and DLQ handling."""
-        async with self.semaphore:
-            try:
-                await callback(key, value)
-                self.metrics.increment(KafkaMetrics.PROCESSED)
-                self.logger.info("Message processed", extra={"key": key, "value": value, "topic": self.topic})
-            except Exception as exc:
-                self.metrics.increment(KafkaMetrics.FAILED_PROCESS)
-                self.logger.exception("Processing failed, sending to DLQ", extra={"key": key, "value": value, "topic": self.topic})
-                await self.send_to_dlq(key, value, str(exc))
-            finally:
-                self.metrics.report()
-
-    async def _consume_loop(self, callback: Callable[[str, dict], Any]):
-        """Internal consume loop with batching, cancellability, and metrics."""
-        batch = []
-        try:
-            async for msg in self.consumer:
-                if self._stop_event.is_set():
-                    break
-
-                key = msg.key.decode() if msg.key else ""
-                value = json.loads(msg.value.decode())
-                batch.append((key, value))
-
-                if len(batch) >= self.batch_size:
-                    await asyncio.gather(*[self._process_message(k, v, callback) for k, v in batch])
-                    batch.clear()
-
-            # Flush leftover batch before exiting
-            if batch:
-                await asyncio.gather(*[self._process_message(k, v, callback) for k, v in batch])
-
-        except asyncio.CancelledError:
-            # Process leftover batch on cancellation
-            if batch:
-                await asyncio.gather(*[self._process_message(k, v, callback) for k, v in batch])
-            self.logger.debug("Consume loop cancelled", extra={"topic": self.topic})
+            await self.retry_policy.execute(_produce)
         except Exception as e:
-            self.logger.exception(f"Error in consume loop: {e}", extra={"topic": self.topic})
+            self.logger.error(
+                "Failed to produce message",
+                extra={"topic": topic, "key": key, "value": value, "error": str(e)},
+            )
+            self.metrics.increment("kafka_failed_produce")
+            raise
 
-    async def consume(self, callback: Callable[[str, dict], Any]):
-        """Start consuming messages in the background."""
-        self._stop_event.clear()
-        if self._consume_task is None or self._consume_task.done():
-            self._consume_task = asyncio.create_task(self._consume_loop(callback))
-        else:
-            self.logger.warning("Consume task already running", extra={"topic": self.topic})
+    # --- Consume ---
+    async def consume(self) -> AsyncIterator[Tuple[str, str, dict]]:
+        """Async generator yielding messages as (topic, key, value)."""
+        if not self._running:
+            await self.start()
+        if self._consumer is None:
+            raise RuntimeError("Kafka consumer not initialized")
+
+        try:
+            async for msg in self._consumer:
+                key = msg.key.decode() if msg.key else "default"
+                value = json.loads(msg.value)
+                self.logger.info(f"Consumed message from kafka: {msg.topic}:{value}")
+                self.metrics.increment("kafka_consume")
+                yield msg.topic, key, value
+        except asyncio.CancelledError:
+            self.logger.info("Kafka consume task cancelled")
+            return
+        except Exception as e:
+            self.logger.error("Kafka consume error", extra={"error": str(e)})
+            self.metrics.increment("kafka_failed_consume")
+            raise
+
+    async def subscribe_to_topics(self, topics: List[str]):
+        """Subscribe the consumer to multiple topics."""
+        if not self._running:
+            await self.start()
+        if self._consumer is None:
+            raise RuntimeError("Kafka consumer not initialized")
+        self._consumer.subscribe(topics)
+        self.logger.info("Consumer subscribed to topics", extra={"topics": topics})

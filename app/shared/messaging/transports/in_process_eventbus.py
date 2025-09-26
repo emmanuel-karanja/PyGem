@@ -5,7 +5,7 @@ from typing import Callable, Dict, List, Any
 from app.shared.messaging import EventBus
 from app.shared.logger import  JohnWickLogger
 from app.shared.metrics.metrics_collector import MetricsCollector
-from app.shared.messaging.annotations import ApplicationScoped
+from annotations import ApplicationScoped
 
 @ApplicationScoped
 class InProcessEventBus(EventBus):

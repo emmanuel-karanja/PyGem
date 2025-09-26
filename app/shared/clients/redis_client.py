@@ -2,22 +2,22 @@ import asyncio
 import json
 from typing import Any, Optional
 from redis.asyncio import Redis
+
+from app.shared.annotations.core import ApplicationScoped
 from app.shared.logger import JohnWickLogger
 from app.shared.metrics.metrics_collector import MetricsCollector
 from app.shared.metrics.metrics_schema import RedisMetrics
-from app.config.settings import Settings
 from app.shared.retry.base import RetryPolicy
 from app.shared.retry.fixed_delay_retry import FixedDelayRetry
 
-settings = Settings()
 
-
+@ApplicationScoped
 class RedisClient:
     """Async Redis client with retries, metrics, JSON support, and TTL."""
 
     def __init__(
         self,
-        redis_url: str = settings.redis.get_url(settings.app.env_mode),
+        redis_url: str,
         logger: Optional[JohnWickLogger] = None,
         retry_policy: Optional[RetryPolicy] = None,
     ):
@@ -38,15 +38,12 @@ class RedisClient:
             await self.retry_policy.execute(_connect)
         except asyncio.CancelledError as ce:
             self.logger.warning("Task was cancelled, cleaning up...")
-            # Optional: close connections, unsubscribe, flush metrics
             raise ce
-            
         except Exception:
             self.logger.error("Failed to connect to Redis after retries", extra={"redis_url": self.redis_url})
             raise ConnectionError(f"Cannot connect to Redis at {self.redis_url}")
 
     async def ping(self) -> bool:
-        """Ping Redis to check connectivity."""
         if self.redis is None:
             await self.connect()
 

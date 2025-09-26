@@ -1,6 +1,6 @@
 # PyGem Messaging Annotation System
 
-This project provides an **annotation-driven EventBus system** for Python applications, inspired by Java's Quarkus approach. It uses decorators to inject loggers, producers, consumers, and automatically manage singletons.
+This project provides an **annotation-driven EventBus system** for Python applications, inspired by Java's Quarkus approach. It uses decorators to inject loggers, producers, consumers, and automatically manage singletons. Obviously, there is more to be done here, and any contributions are most welcome.
 
 ---
 

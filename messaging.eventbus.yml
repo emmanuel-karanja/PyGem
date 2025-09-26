@@ -1,12 +1,13 @@
 messaging:
   eventbus:
-    transport: kafka  # options: redis, kafka, memory
+    transport: redis  # options: redis, kafka, memory
 
 kafka:
   bootstrap_servers: "127.0.0.1:9092"
   group_id: "order-service-group"
-  topic: "orders"
+  topic: "orders.placed"
   dlq_topic: "orders_dlq"
+  max_concurrency: 5
 
 redis:
   host: "127.0.0.1"

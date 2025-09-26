@@ -1,8 +1,7 @@
 import os
 import yaml
 import configparser
-import asyncio
-from typing import Optional, Dict
+from typing import Dict
 
 from app.shared.logger import JohnWickLogger
 from app.shared.metrics.metrics_collector import MetricsCollector
@@ -53,10 +52,9 @@ class EventBusFactory:
             from app.shared.messaging.transports.redis_bus import RedisEventBus
 
             redis_config = config.get("redis", {})
+            redis_url = f"redis://{redis_config.get('host', '127.0.0.1')}:{int(redis_config.get('port', 6379))}/{int(redis_config.get('db', 0))}"
             redis_client = RedisClient(
-                host=redis_config.get("host", "127.0.0.1"),
-                port=int(redis_config.get("port", 6379)),
-                db=int(redis_config.get("db", 0)),
+                redis_url=redis_url
             )
             cls._event_bus = RedisEventBus(redis_client=redis_client, logger=logger, metrics=metrics)
 
@@ -67,8 +65,9 @@ class EventBusFactory:
             kafka_client = KafkaClient(
                 bootstrap_servers=kafka_config.get("bootstrap_servers", "127.0.0.1:9092"),
                 group_id=kafka_config.get("group_id", "default-group"),
-                topic=kafka_config.get("topic", "default-topic"),
-               dlq_topic=kafka_config.get("dlq_topic", "default-dlq")
+                topics=[kafka_config.get("topic", "default-topic")],
+                dlq_topic=kafka_config.get("dlq_topic", "default-dlq"),
+                max_concurrency=kafka_config.get("max_concurrency",5)
             )
             cls._event_bus = KafkaEventBus(kafka_client=kafka_client, logger=logger, metrics=metrics)
 
