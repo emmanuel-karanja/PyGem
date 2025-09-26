@@ -1,280 +1,142 @@
-# 🏗️ PyGem Modular Monolith FastAPI Boilerplate
+# PyGem Messaging Annotation System
 
-
-![CI](https://github.com/emmanuel-karanja/PyGem/actions/workflows/ci.yml/badge.svg)
-
-A **bulletproof boilerplate template** for building **modular monoliths** in Python with **FastAPI**.  
-Cobbled together from best practices and **extra-spiced with GenAI** for those cute ✅ / ❌ emojis.
+This project provides an **annotation-driven EventBus system** for Python applications, inspired by Java's Quarkus approach. It uses decorators to inject loggers, producers, consumers, and automatically manage singletons.
 
 ---
 
-## 🌟 Features
+## Features
 
-- **Modular Feature Architecture**  
-  Organize your app by feature folders:  
-  ```
-  app/
-    feature1/
-    feature2/
-    shared/
-  ```
-  Makes splitting features into microservices later trivial.
-
-- **Async PostgreSQL Client**
-  - Connection pooling ✅  
-  - Retry policies ✅  
-  - Batch & transaction support ✅  
-  - COPY-based bulk insert for huge datasets ✅  
-
-- **Redis Client**
-  - Async support ✅  
-  - TTL support ✅  
-  - JSON serialization ✅  
-  - Fully integrated structured logging ✅  
-
-- **Event Bus**
-  - Kafka and in-memory (Redis) event buses  
-  - Fire-and-forget, safe subscribers ✅  
-  - Retryable callbacks ✅  
-
-- **Logging & Metrics**
-  - `JohnWickLogger` for structured logs ✅  
-  - Metrics collection for DB, Redis, and events ✅  
-
-- **FastAPI Lifecycle Ready**
-  - Startup/shutdown handled via **lifespan events**  
-  - Automatic DB initialization, Redis connect, and Kafka startup  
-
-- **Configuration**
-  - `.env`-based settings  
-  - `pydantic-settings` support ✅  
-
-- **Test-Friendly**
-  - Dependency injection for clients & services  
-  - Dummy Redis/Kafka clients for tests ✅  
+- **ApplicationScoped**: Automatically creates singleton-managed classes.
+- **LoggerBinding**: Automatically injects a structured `JohnWickLogger` instance into classes or functions.
+- **Producer / Consumer**: Decorators to produce and consume messages from the EventBus without boilerplate.
+- **Inject**: Resolves dependencies from singletons or factory callables.
+- **EventBusFactory**: Creates a configured EventBus based on YAML/properties configuration, supporting in-memory, Redis, and Kafka transports.
+- **Subscribe**: Registers functions to automatically receive EventBus messages.
 
 ---
 
-## ⚡ Quick Start
+## Installation
 
-1. **Clone repo**
+1. Clone the repository:
 ```bash
 git clone https://github.com/emmanuel-karanja/PyGem.git
-cd PyGem
 ```
 
-2. **Install dependencies**
-```PowerShell
-./Setup.ps1 
-```
-That's it, it does everything including setting up python and the environment
+2. Create a virtual environment and install dependencies and launch a container to run kafka, redis, and postgres:
+```powershell
 
-3. **Configure environment**
- Modifythe `.env` file:
-```
-APP_NAME=ModularMonolithApp
-DEBUG=True
-REDIS_URL=redis://localhost:6379
-DATABASE_URL=postgresql+asyncpg://user:password@localhost:5432/mydatabase
-KAFKA_BOOTSTRAP_SERVERS=localhost:9092
-LOG_FILE=logs/app.log
-LOG_LEVEL=INFO
+./build.ps1
 ```
 
-4. **Run the application**
-```.Run.ps1
-```
-✅ Visit `http://127.0.0.1:8000/docs` for auto-generated OpenAPI docs.
+This will install python if it's not installed, install the dependencies and also roll out kafka, postgresql and redis
+within docker. You need to have docker installed.
 
----
-
-## 📦 Project Structure
-
-```
-app/
-├── config/
-│   ├── settings.py
-│   ├── dependencies.py
-│   ├── db_session.py          # Async SQLAlchemy session factory
-│   └── factory.py             # DI factories for Redis, Kafka, Postgres, logger
-├── feature1/
-│   ├── models.py
-│   ├── routes.py
-│   └── services.py
-├── feature2/
-│   └── ...
-├── shared/
-│   ├── clients/
-│   │   ├── redis_client.py    # Async Redis client with TTL & JSON
-│   │   └── postgres_client.py # Async Postgres client with batching & metrics
-│   ├── database/
-│   │   └── base.py            # SQLAlchemy Base & engine setup
-│   ├── event_bus/
-│   │   ├── kafka_bus.py       # Async Kafka event bus
-│   │   └── inprocess.py       # In-memory event bus
-│   ├── metrics/
-│   │   └── metrics_collector.py # Tracks successes/failures/processed
-│   └── logger/
-│       └── bulletproof_logger.py
-└── main.py
-
+3. Configure messaging in `messaging.eventbus.yml` or `messaging.eventbus.properties`. Example:
+```yaml
+messaging:
+  eventbus:
+    transport: kafka
+kafka:
+  bootstrap_servers: 127.0.0.1:9092
+  group_id: default-group
+  topic: default-topic
+  dlq_topic: default-dlq
 ```
 
 ---
 
-## 🚀 Features in Action
+## Usage
 
-### Redis Example
+### **1. Define a Singleton Service**
 ```python
-from app.config.factory import get_redis_client
+from app.shared.annotations import ApplicationScoped, LoggerBinding
 
-redis = get_redis_client()
-await redis.set("foo", {"bar": 123}, ttl=60)
-value = await redis.get("foo")
-```
-
-### Kafka Example
-```python
-from app.config.factory import get_kafka_event_bus
-
-bus = get_kafka_event_bus()
-
-async def handle_event(payload):
-    print("Received event:", payload)
-
-await bus.subscribe("feature_events", handle_event)
-await bus.publish("feature_events", {"msg": "Hello world"})
-```
-
-### Postgres Example
-```python
-from app.config.dependencies import async_sessionmaker
-from app.shared.database.postgres_client import PostgresClient
-
-pg = PostgresClient(dsn="postgresql+asyncpg://user:password@localhost/db")
-
-await pg.execute("INSERT INTO users (name) VALUES ($1)", "Alice")
-rows = await pg.fetch("SELECT * FROM users")
-```
-
----
-
-## 📊 Metrics & Logging
-- All DB, Redis, and EventBus operations are tracked with **MetricsCollector**.
-- Logs are structured and saved to `logs/app.log`.
-- Global logger: `JohnWickLogger` for unified logging.
-
----
-
-## 🧪 Testing
-- Supports pytest with **dummy clients** for Redis/Kafka.
-- Example:
-```python
-import pytest
-from app.shared.clients.redis_client import RedisClient
-
-@pytest.mark.asyncio
-async def test_redis_set_get_delete():
-    client = RedisClient()
-    await client.set("test", {"x": 1})
-    val = await client.get("test")
-    assert val == {"x": 1}
-```
-
----
-
-## 🎯 Why This Template?
-- Saves hours of setup ✅  
-- Implements production-grade async patterns ✅  
-- If not for anything the JohnWickLogger is pretty dope!
-- Modular & scalable for microservices l
-
-# JohnWickLogger Documentation
-
-## Logging with JohnWickLogger
-
-`JohnWickLogger` is a custom logger for this project that provides:
-
-- JSON logs for file handlers
-- Colorized logs for console output
-- Support for `extra` metadata for structured logging
-
----
-
-## Initialization
-
-```python
-from app.shared.logger.john_wick_logger import JohnWickLogger
-
-logger = JohnWickLogger(
-    name="app_logger",
-    log_file="app.log",
-    json_format=True  # Use JSON for console, too
-)
-```
-
----
-
-## Logging Methods
-
-`JohnWickLogger` keeps the standard logging interface:
-
-```python
-logger.debug("Debug message", extra={"class_name": "MyClass"})
-logger.info("Info message", extra={"user_id": 42})
-logger.warning("Warning message")
-logger.error("Error message")
-logger.exception("Exception message")
-```
-
-- All methods accept an optional `extra` dictionary for structured metadata.
-- `class_name`, `module_name`, or request-specific identifiers can be included.
-
----
-
-## Example: Adding Extras
-
-```python
-class FeatureService:
-    def __init__(self):
+@ApplicationScoped
+@LoggerBinding()
+class OrderService:
+    def __init__(self, logger=None, event_bus=None):
         self.logger = logger
+        self.event_bus = event_bus
 
-    def process(self, user_id: int):
-        self.logger.info(
-            "Processing user request",
-            extra={"class_name": self.__class__.__name__, "user_id": user_id}
-        )
-
-service = FeatureService()
-service.process(user_id=42)
+    async def place_order(self, order_id: str):
+        self.logger.info(f"Placing order {order_id}")
+        await self.event_bus.publish("order.placed", {"id": order_id})
 ```
 
-**File output (JSON):**
+### **2. Use Producer / Consumer Decorators**
+```python
+from app.shared.annotations import Producer, Consumer
 
-```json
-{
-  "timestamp": "2025-09-25T12:30:01",
-  "level": "INFO",
-  "name": "app_logger",
-  "message": "Processing user request",
-  "extra": {
-    "class_name": "FeatureService",
-    "user_id": 42
-  }
-}
+@Producer(topic="order.placed")
+class OrderProducer:
+    pass  # auto-injects EventBus and provides .publish(payload) method
+
+@Consumer(topic="order.placed")
+async def handle_order(event):
+    print("Received order:", event)
 ```
 
-**Console output (colorized):**
+### **3. Inject Dependencies**
+```python
+from app.shared.annotations import Inject
+from app.orders.order_service import OrderService
 
+service = Inject(OrderService)  # returns singleton instance
+await service.place_order("12345")
 ```
-2025-09-25 12:30:01 - app_logger - INFO - Processing user request
+
+### **4. Startup Initialization in FastAPI**
+```python
+from fastapi import FastAPI
+from app.shared.annotations import Inject
+from app.orders.order_service import OrderService
+from app.shared.messaging.event_bus_factory import EventBusFactory
+
+app = FastAPI()
+
+@app.on_event("startup")
+async def startup_event():
+    Inject(OrderService)  # create singleton
+    factory = Inject(EventBusFactory)
+    factory.create_event_bus()  # ensures EventBus is ready
 ```
 
 ---
 
-## Best Practices
+## EventBus Transports
 
-- Always include `class_name` or `module_name` in `extra` for traceability. NB: We could have added automation for this,but
-  it'd require walking the stack which adds some overhead, improves to come soon.
-- Include request or user identifiers for distributed tracing.
-- Avoid logging sensitive information like passwords or secr
+- **In-memory**: Default fallback, no external dependencies.
+- **Redis**: Supports pub/sub with `RedisClient`.
+- **Kafka**: Async producer/consumer with retry, DLQ, batching, and metrics.
+
+---
+
+## Annotations Summary
+
+| Annotation          | Usage                                    | Notes                                      |
+|--------------------|-----------------------------------------|-------------------------------------------|
+| `@ApplicationScoped` | Class                                   | Singleton-managed bean                     |
+| `@LoggerBinding()`   | Class or function                       | Injects `JohnWickLogger`                  |
+| `@Producer(topic)`   | Class                                   | Auto-injects EventBus and `.publish()`    |
+| `@Consumer(topic)`   | Async function                          | Auto-subscribes to EventBus topic         |
+| `Inject(cls_or_factory)` | Anywhere                            | Resolves singleton or calls factory       |
+| `@Subscribe(event_name)` | Async function                        | Registers function for EventBus events    |
+
+---
+
+## Notes
+
+- **EventBusFactory** is a singleton itself and auto-binds subscribers on creation.
+- Consumers use `asyncio.create_task()` for fire-and-forget subscriptions.
+- Producer classes get a convenience `.publish(payload)` method automatically.
+- Logger injection respects existing `logger` parameters.
+
+---
+
+This system reduces boilerplate for messaging-heavy applications while maintaining Pythonic async patterns.
+
+---
+
+**Author:** Emmanuel  
+**License:** MIT
+
