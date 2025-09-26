@@ -140,3 +140,92 @@ This system reduces boilerplate for messaging-heavy applications while maintaini
 **Author:** Emmanuel  
 **License:** MIT
 
+## Flow 
+        ┌─────────────────────┐
+        │ Your Application    │
+        │ subscribe() / publish() │
+        └─────────┬───────────┘
+                  │
+                  ▼
+        ┌─────────────────────┐
+        │ KafkaEventBus       │
+        │ - _ensure_topic_exists() ────┐
+        │ - start consume loop         │
+        └─────────┬───────────────────┘
+                  │
+                  ▼
+        ┌─────────────────────┐
+        │ KafkaClient         │
+        │ - create_topics()   │
+        │ - produce(message)  │
+        │ - consume()         │
+        └─────────┬───────────┘
+                  │
+                  ▼
+          Kafka Broker / Cluster
+                  │
+       ┌──────────┴───────────┐
+       │ Async message arrives │
+       └──────────┬───────────┘
+                  │
+                  ▼
+        ┌─────────────────────┐
+        │ KafkaEventBus       │
+        │ consume loop triggered
+        └─────────┬───────────┘
+                  │
+          ┌───────┴───────────┐
+          │ Subscriber Callbacks │
+          │ (async tasks)       │
+          │                     │
+          │ task1   task2   task3
+          │  │       │       │
+          │  ▼       ▼       ▼
+          │ process messages concurrently
+          │ using asyncio.gather()
+          └─────────┬───────────┘
+                    │
+                    ▼
+           Metrics / Logging updated
+                    │
+                    ▼
+          ┌─────────────────────┐
+          │ Application receives │
+          │ processed messages   │
+          └─────────────────────┘
+
+
+## Time Flow
+
+Time ──────────────────────────▶
+
+Kafka Broker
+   │
+   │ message1 arrives
+   ▼
+KafkaEventBus.consume_loop(topic)
+   │
+   │ for msg in consume(): yields message
+   ▼
+Wrap subscribers in async tasks
+   ┌───────────────┬───────────────┐
+   │ task1         │ task2         │ task3
+   │               │               │
+   ▼               ▼               ▼
+subscriber1()   subscriber2()   subscriber3()
+   │               │               │
+   │  processing   │  processing   │  processing
+   │  (awaitable)  │  (awaitable)  │  (awaitable)
+   └───────────────┴───────────────┘
+   │
+asyncio.gather(*tasks, return_exceptions=True)
+   │
+   ▼
+All subscriber tasks completed for message1
+   │
+   └── Metrics incremented / logs updated
+   │
+   ▼
+Next message (message2) arrives
+   │
+   ──> Repeat: tasks created concurrently per subscriber
