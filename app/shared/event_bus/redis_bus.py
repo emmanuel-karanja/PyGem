@@ -4,7 +4,7 @@ import json
 
 from app.shared.event_bus.base import EventBus
 from app.shared.clients import RedisClient
-from app.config.logger import get_logger, JohnWickLogger
+from app.shared.logger import  JohnWickLogger
 from app.shared.metrics.metrics_collector import MetricsCollector
 from app.shared.retry.base import RetryPolicy
 from app.shared.retry.fixed_delay_retry import FixedDelayRetry

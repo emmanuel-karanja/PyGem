@@ -2,7 +2,7 @@ import asyncio
 import json
 from typing import Any, Optional
 from redis.asyncio import Redis
-from app.config.logger import JohnWickLogger, get_logger
+from app.shared.logger import JohnWickLogger
 from app.shared.metrics.metrics_collector import MetricsCollector
 from app.shared.metrics.metrics_schema import RedisMetrics
 from app.config.settings import Settings
@@ -22,7 +22,7 @@ class RedisClient:
         retry_policy: Optional[RetryPolicy] = None,
     ):
         self.redis_url = redis_url
-        self.logger = logger or get_logger("RedisClient")
+        self.logger = logger or JohnWickLogger("RedisClient")
         self.redis: Optional[Redis] = None
         self.metrics = MetricsCollector(self.logger)
         self.retry_policy: RetryPolicy = retry_policy or FixedDelayRetry(max_retries=3)
@@ -36,6 +36,10 @@ class RedisClient:
 
         try:
             await self.retry_policy.execute(_connect)
+        except asyncio.CancelledError:
+            self.logger.warning("Task was cancelled, cleaning up...")
+            # Optional: close connections, unsubscribe, flush metrics
+            raise
         except Exception:
             self.logger.error("Failed to connect to Redis after retries", extra={"redis_url": self.redis_url})
             raise ConnectionError(f"Cannot connect to Redis at {self.redis_url}")

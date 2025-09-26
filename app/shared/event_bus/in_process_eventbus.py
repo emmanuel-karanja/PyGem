@@ -3,7 +3,7 @@ import inspect
 from typing import Callable, Dict, List, Any
 
 from app.shared.event_bus.base import EventBus
-from app.config.logger import get_logger, JohnWickLogger
+from app.shared.logger import  JohnWickLogger
 from app.shared.metrics.metrics_collector import MetricsCollector
 
 
@@ -16,7 +16,7 @@ class InProcessEventBus(EventBus):
     def __init__(self, max_retries: int = 3, logger: JohnWickLogger = None):
         self.subscribers: Dict[str, List[Callable[[Any], Any]]] = {}
         self.max_retries = max_retries
-        self.logger: JohnWickLogger = logger or get_logger("InProcessEventBus")
+        self.logger = logger or JohnWickLogger(name="InProcessEventBus")
         self.metrics = MetricsCollector(self.logger)
 
     async def publish(self, event_name: str, payload: dict):

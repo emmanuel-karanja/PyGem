@@ -4,7 +4,7 @@ import time
 from typing import Callable, Any, Optional
 from aiokafka import AIOKafkaProducer, AIOKafkaConsumer
 
-from app.config.logger import JohnWickLogger, get_logger
+from app.shared.logger import JohnWickLogger
 from app.shared.metrics.metrics_collector import MetricsCollector
 from app.shared.metrics.metrics_schema import KafkaMetrics
 from app.shared.retry.base import RetryPolicy
@@ -30,7 +30,7 @@ class KafkaClient:
         self.dlq_topic = dlq_topic
         self.group_id = group_id
 
-        self.logger = logger or get_logger("KafkaClient")
+        self.logger = logger or JohnWickLogger(name="KafkaClient")
         self.retry_policy = retry_policy or FixedDelayRetry(max_retries=3)
         self.semaphore = asyncio.Semaphore(max_concurrency)
         self.batch_size = batch_size

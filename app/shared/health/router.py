@@ -1,5 +1,5 @@
 from fastapi import FastAPI, APIRouter
-from app.config.logger import JohnWickLogger
+from app.shared.logger import JohnWickLogger
 from app.shared.health import HealthChecker  # Assuming HealthChecker is in services/health_check.py
 
 logger = JohnWickLogger(name="HealthCheck")

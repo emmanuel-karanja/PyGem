@@ -2,14 +2,15 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.config.db_session import get_sessionmaker
 from app.shared.database import PostgresClient
-from app.config.factory import get_logger, get_redis_client, get_kafka_event_bus,get_kafka_client,get_redis_event_bus,get_postgres_client
+from app.config.factory import get_redis_client, get_kafka_event_bus,get_kafka_client,get_redis_event_bus,get_postgres_client
 from app.config.settings import Settings
+from app.shared.logger import JohnWickLogger
 
 # ----------------------------
 # Config / Singleton Instances
 # ----------------------------
 settings = Settings()
-logger = get_logger()
+logger = JohnWickLogger(name="Dependencies")
 redis_client = get_redis_client()
 redis_event_bus=get_redis_event_bus()
 kafka_client=get_kafka_client()

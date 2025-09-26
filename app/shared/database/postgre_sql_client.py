@@ -5,7 +5,7 @@ from typing import Callable, Any, List, Optional, Tuple, Dict
 import asyncpg
 from app.shared.database.base import DatabaseClient
 from app.shared.retry import RetryPolicy, ExponentialBackoffRetry
-from app.config.logger import JohnWickLogger
+from app.shared.logger import JohnWickLogger
 from app.shared.metrics.metrics_collector import MetricsCollector
 
 logger = JohnWickLogger(name="PostgresClientV3")

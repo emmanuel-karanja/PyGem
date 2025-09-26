@@ -1,5 +1,5 @@
 from functools import lru_cache
-from app.config.logger import JohnWickLogger, get_logger
+from app.shared.logger import JohnWickLogger
 from app.shared.clients import RedisClient, KafkaClient
 from app.shared.database import PostgresClient
 from app.shared.event_bus import KafkaEventBus, RedisEventBus

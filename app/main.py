@@ -8,12 +8,13 @@ from app.config.dependencies import (
 )
 from app.config.settings import Settings
 from app.config.db_session import init_db
-from app.config.logger import logger
 from app.shared.health import health_router
+from app.shared.logger import JohnWickLogger
 import asyncio
 
+logger=JohnWickLogger(name="AppMain")
 settings = Settings()
-app = FastAPI(title="Modular Monolith FastAPI App")
+app = FastAPI(title="AppMain")
 
 # ----------------------------
 # Test endpoint

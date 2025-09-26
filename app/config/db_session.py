@@ -5,10 +5,10 @@ from typing import Optional
 
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncEngine, AsyncSession
 from sqlalchemy.orm import declarative_base, sessionmaker
+from app.shared.logger import JohnWickLogger
 
-from app.config.logger import JohnWickLogger,get_logger
 
-logger=get_logger()
+logger=JohnWickLogger(name="DB_Session_Init")
 # ----------------------------
 # Base declarative class
 # ----------------------------

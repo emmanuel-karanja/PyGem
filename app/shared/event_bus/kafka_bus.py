@@ -1,7 +1,7 @@
 import asyncio
 from typing import Callable, Dict, Optional
 from app.shared.clients import KafkaClient
-from app.config.logger import JohnWickLogger, get_logger
+from app.shared.logger import JohnWickLogger
 from app.shared.metrics.metrics_collector import MetricsCollector
 from app.shared.retry import RetryPolicy, FixedDelayRetry
 
@@ -20,7 +20,7 @@ class KafkaEventBus:
         metrics: Optional[MetricsCollector] = None,
         retry_policy: Optional[RetryPolicy] = None,
     ):
-        self.logger: JohnWickLogger = logger or JohnWickLogger(name="KafkaEventBus")
+        self.logger= logger or JohnWickLogger(name="KafkaEventBus")
         self.kafka_client: KafkaClient = kafka_client or KafkaClient(
             bootstrap_servers="localhost:9092",
             topic="default",
