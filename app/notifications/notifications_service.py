@@ -1,7 +1,8 @@
+from app.shared.annotations.core import RequestScoped
 from app.shared.annotations import ApplicationScoped, LoggerBinding, Consumer
 from app.shared.logger.john_wick_logger import JohnWickLogger
 
-@ApplicationScoped
+@RequestScoped
 @LoggerBinding()
 class NotificationService:
     def __init__(self,logger:JohnWickLogger=None):

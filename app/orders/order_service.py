@@ -1,8 +1,9 @@
+from app.shared.annotations.core import RequestScoped
 from app.shared.annotations import ApplicationScoped, LoggerBinding, Producer
 from app.shared.logger import JohnWickLogger
 
 
-@ApplicationScoped
+@RequestScoped
 @LoggerBinding()  # auto-injects logger
 @Producer(topic="order.placed")  # auto-injects EventBus and sets topic
 class OrderService:
