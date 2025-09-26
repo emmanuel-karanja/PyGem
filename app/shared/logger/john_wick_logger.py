@@ -1,13 +1,13 @@
-# john_wick_logger_uvicorn_color.py
+# john_wick_logger_uvicorn_stack.py
 import asyncio
 import logging
-from typing import Optional, Dict
 import structlog
+import inspect
+from typing import Optional, Dict
 
 class JohnWickLogger:
     _logger_cache: Dict[str, "JohnWickLogger"] = {}
 
-    # Simple ANSI colors
     LEVEL_COLORS = {
         "DEBUG": "\033[36m",     # cyan
         "INFO": "\033[32m",      # green
@@ -32,39 +32,55 @@ class JohnWickLogger:
         # ----------------------------
         console_handler = logging.StreamHandler()
         console_handler.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
-
-        # File logger
-        file_handler = logging.FileHandler(log_file, encoding="utf-8")
-
-        logging.basicConfig(
-            level=getattr(logging, level.upper(), logging.INFO),
-            handlers=[console_handler, file_handler],
-            format="%(message)s",
-        )
+        console_logger = logging.getLogger(f"{name}_console")
+        console_logger.setLevel(getattr(logging, level.upper(), logging.INFO))
+        if not console_logger.hasHandlers():
+            console_logger.addHandler(console_handler)
+        self.console_logger = console_logger
 
         # ----------------------------
-        # Structlog processors for JSON file
+        # File logger (structlog JSON)
         # ----------------------------
+        file_logger = logging.getLogger(f"{name}_file")
+        file_logger.setLevel(getattr(logging, level.upper(), logging.INFO))
+        if not any(isinstance(h, logging.FileHandler) for h in file_logger.handlers):
+            fh = logging.FileHandler(log_file, encoding="utf-8")
+            fh.setFormatter(logging.Formatter("%(message)s"))
+            file_logger.addHandler(fh)
+
+        # ----------------------------
+        # Custom processor to walk the stack
+        # ----------------------------
+        def add_caller_stack(logger, method_name, event_dict):
+            frame = inspect.currentframe()
+            while frame:
+                module_name = frame.f_globals.get("__name__")
+                if module_name and not module_name.startswith("structlog") and not module_name.endswith("john_wick_logger"):
+                    event_dict["module"] = module_name
+                    event_dict["function"] = frame.f_code.co_name
+                    event_dict["file"] = frame.f_code.co_filename
+                    event_dict["lineno"] = frame.f_lineno
+                    cls = frame.f_locals.get("self")
+                    if cls:
+                        event_dict["class"] = cls.__class__.__name__
+                    break
+                frame = frame.f_back
+            return event_dict
+
         file_processors = [
-            structlog.processors.TimeStamper(fmt="ISO"),       # adds timestamp
-            structlog.stdlib.add_log_level,                    # adds level
-            structlog.stdlib.add_logger_name,                 # adds logger name
-            structlog.stdlib.PositionalArgumentsFormatter(),  # formats args
-            structlog.processors.StackInfoRenderer(),         # adds stack info if stack=True
-            structlog.processors.format_exc_info,             # adds exception info
-            structlog.processors.UnicodeDecoder(),           # ensures unicode
-            structlog.processors.JSONRenderer()              # outputs JSON
+            structlog.processors.TimeStamper(fmt="ISO"),
+            structlog.stdlib.add_log_level,
+            structlog.stdlib.add_logger_name,
+            structlog.stdlib.PositionalArgumentsFormatter(),
+            structlog.processors.StackInfoRenderer(),
+            structlog.processors.format_exc_info,
+            add_caller_stack,
+            structlog.processors.UnicodeDecoder(),
+            structlog.processors.JSONRenderer()
         ]
 
-
-        # ----------------------------
-        # Loggers
-        # ----------------------------
-        self.console_logger = logging.getLogger(f"{name}_console")
-        self.console_logger.setLevel(getattr(logging, level.upper(), logging.INFO))
-
         self.file_logger = structlog.wrap_logger(
-            logging.getLogger(f"{name}_file"),
+            file_logger,
             processors=file_processors,
             wrapper_class=structlog.stdlib.BoundLogger,
             cache_logger_on_first_use=True
