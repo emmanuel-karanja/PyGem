@@ -1,62 +1,34 @@
 import asyncio
 import json
-from typing import Any, Optional, Callable
+from typing import Any, Optional
 from redis.asyncio import Redis
-from app.config.logger import JohnWickLogger
+from app.config.logger import JohnWickLogger, get_logger
 from app.shared.metrics.metrics_collector import MetricsCollector
 from app.shared.metrics.metrics_schema import RedisMetrics
 from app.config.settings import Settings
 from app.shared.retry.base import RetryPolicy
 from app.shared.retry.fixed_delay_retry import FixedDelayRetry
 
-settings=Settings()
+settings = Settings()
+
+
 class RedisClient:
-    """
-    Bulletproof Redis client with:
-    - Async support
-    - Retries with RetryPolicy
-    - TTL support
-    - JSON serialization
-    - Fully integrated with injected JohnWickLogger and metrics
-    """
+    """Async Redis client with retries, metrics, JSON support, and TTL."""
 
     def __init__(
         self,
-        redis_url: str = settings.redis.get_url,
+        redis_url: str = settings.redis.get_url(settings.app.env_mode),
         logger: Optional[JohnWickLogger] = None,
         retry_policy: Optional[RetryPolicy] = None,
     ):
-        self.redis = redis_url
-        self.logger: JohnWickLogger = JohnWickLogger("RedisClient")
+        self.redis_url = redis_url
+        self.logger = logger or get_logger("RedisClient")
         self.redis: Optional[Redis] = None
         self.metrics = MetricsCollector(self.logger)
-        # Retry policy: default to FixedDelayRetry if none provided
         self.retry_policy: RetryPolicy = retry_policy or FixedDelayRetry(max_retries=3)
-    async def ping(self) -> bool:
-            """
-            Ping Redis to check connectivity.
-            Returns True if Redis responds, False otherwise.
-            """
-            if self.redis is None:
-                await self.connect()
 
-            async def _ping():
-                result = await self.redis.ping()
-                self.logger.info("Redis PING", extra={"result": result})
-                self.metrics.increment(RedisMetrics.PING)
-                return result
-
-            try:
-                return await self.retry_policy.execute(_ping)
-            except Exception:
-                self.logger.error("Redis PING failed", extra={"redis_url": self.redis_url})
-                self.metrics.increment(RedisMetrics.FAILED_PING)
-                self.metrics.report()
-                return False
-
-       
     async def connect(self):
-        """Connect to Redis using retry policy."""
+        """Connect to Redis and ping to verify connectivity."""
         async def _connect():
             self.redis = Redis.from_url(self.redis_url, decode_responses=True)
             await self.redis.ping()
@@ -65,13 +37,32 @@ class RedisClient:
         try:
             await self.retry_policy.execute(_connect)
         except Exception:
-            self.logger.error("Failed to connect to Redis after retries")
-            raise ConnectionError("Cannot connect to Redis")
+            self.logger.error("Failed to connect to Redis after retries", extra={"redis_url": self.redis_url})
+            raise ConnectionError(f"Cannot connect to Redis at {self.redis_url}")
 
-    async def set(self, key: str, value: Any, ttl: Optional[int] = None):
-        """Set a key in Redis with retry policy."""
+    async def ping(self) -> bool:
+        """Ping Redis to check connectivity."""
         if self.redis is None:
             await self.connect()
+
+        async def _ping():
+            result = await self.redis.ping()
+            self.logger.info("Redis PING", extra={"result": result})
+            self.metrics.increment(RedisMetrics.PING)
+            return result
+
+        try:
+            return await self.retry_policy.execute(_ping)
+        except Exception:
+            self.logger.error("Redis PING failed", extra={"redis_url": self.redis_url})
+            self.metrics.increment(RedisMetrics.FAILED_PING)
+            self.metrics.report()
+            return False
+
+    async def set(self, key: str, value: Any, ttl: Optional[int] = None):
+        if self.redis is None:
+            await self.connect()
+
         payload = json.dumps(value) if isinstance(value, (dict, list)) else value
 
         async def _set():
@@ -82,39 +73,34 @@ class RedisClient:
         try:
             await self.retry_policy.execute(_set)
         except Exception:
-            self.logger.error("Redis SET failed after retry policy", extra={"key": key, "value": value})
+            self.logger.error("Redis SET failed after retries", extra={"key": key, "value": value})
             self.metrics.increment(RedisMetrics.FAILED_SET)
             self.metrics.report()
             raise
 
     async def get(self, key: str) -> Any:
-        """Get a key from Redis with retry policy."""
         if self.redis is None:
             await self.connect()
 
         async def _get():
             value = await self.redis.get(key)
+            self.metrics.increment(RedisMetrics.GET)
             if value is None:
-                self.metrics.increment(RedisMetrics.GET)
                 return None
             try:
-                deserialized = json.loads(value)
-                self.metrics.increment(RedisMetrics.GET)
-                return deserialized
+                return json.loads(value)
             except json.JSONDecodeError:
-                self.metrics.increment(RedisMetrics.GET)
                 return value
 
         try:
             return await self.retry_policy.execute(_get)
         except Exception:
-            self.logger.error("Redis GET failed after retry policy", extra={"key": key})
+            self.logger.error("Redis GET failed after retries", extra={"key": key})
             self.metrics.increment(RedisMetrics.FAILED_GET)
             self.metrics.report()
             return None
 
     async def delete(self, key: str) -> bool:
-        """Delete a key from Redis with retry policy."""
         if self.redis is None:
             await self.connect()
 
@@ -127,13 +113,12 @@ class RedisClient:
         try:
             return await self.retry_policy.execute(_del)
         except Exception:
-            self.logger.error("Redis DEL failed after retry policy", extra={"key": key})
+            self.logger.error("Redis DEL failed after retries", extra={"key": key})
             self.metrics.increment(RedisMetrics.FAILED_DEL)
             self.metrics.report()
             return False
 
     async def exists(self, key: str) -> bool:
-        """Check if key exists in Redis with retry policy."""
         if self.redis is None:
             await self.connect()
 
@@ -145,7 +130,7 @@ class RedisClient:
         try:
             return await self.retry_policy.execute(_exists)
         except Exception:
-            self.logger.error("Redis EXISTS failed after retry policy", extra={"key": key})
+            self.logger.error("Redis EXISTS failed after retries", extra={"key": key})
             self.metrics.increment(RedisMetrics.FAILED_EXISTS)
             self.metrics.report()
             return False

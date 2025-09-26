@@ -72,7 +72,7 @@ def get_kafka_client() -> KafkaClient:
 @lru_cache
 def get_redis_event_bus() -> RedisEventBus:
     logger = JohnWickLogger(name="RedisEventBus")
-    metrics = MetricsCollector(logger=logger)
+    metrics = MetricsCollector(logger=JohnWickLogger(name="RedisEventBus - MetricsCollector"))
     return RedisEventBus(
         redis_client=get_redis_client(),
         logger=logger,
@@ -90,7 +90,7 @@ def get_redis_event_bus() -> RedisEventBus:
 @lru_cache
 def get_kafka_event_bus() -> KafkaEventBus:
     logger = JohnWickLogger(name="KafkaEventBus")
-    metrics = MetricsCollector(logger=logger)
+    metrics = MetricsCollector(logger=JohnWickLogger(name="KafkaEventBus - MetricsCollector"))
     return KafkaEventBus(
         kafka_client=get_kafka_client(),
         logger=logger,

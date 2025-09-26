@@ -1,7 +1,7 @@
 import asyncio
 from typing import Any, Awaitable, Callable
 from app.shared.retry.base import RetryPolicy
-from app.config.logger import get_logger,JohnWickLogger
+from app.config.logger import get_logger, JohnWickLogger
 
 
 class FixedDelayRetry(RetryPolicy):
@@ -14,6 +14,9 @@ class FixedDelayRetry(RetryPolicy):
         for attempt in range(1, self.max_retries + 1):
             try:
                 return await func(*args, **kwargs)
+            except asyncio.CancelledError:
+                # Propagate cancellation immediately
+                raise
             except Exception as exc:
                 if attempt == self.max_retries:
                     self.logger.error(
@@ -29,4 +32,8 @@ class FixedDelayRetry(RetryPolicy):
                     f"Attempt {attempt} failed, retrying in {self.delay:.2f}s",
                     extra={"error": str(exc)},
                 )
-                await asyncio.sleep(self.delay)
+                try:
+                    await asyncio.sleep(self.delay)
+                except asyncio.CancelledError:
+                    self.logger.info("Retry sleep cancelled")
+                    raise

@@ -1,0 +1,25 @@
+
+
+
+ALLOW FIREWALL RULES: For REDIS AND KAFKA
+
+*Run this administator
+
+New-NetFirewallRule -DisplayName "Allow Redis" -Direction Inbound -LocalPort 6379 -Protocol TCP -Action Allow
+
+# Kafka
+New-NetFirewallRule -DisplayName "Allow Kafka" -Direction Inbound -LocalPort 9092 -Protocol TCP -Action Allow
+# Zookeeper
+New-NetFirewallRule -DisplayName "Allow Zookeeper" -Direction Inbound -LocalPort 2181 -Protocol TCP -Action Allow
+
+
+*Run this to test
+
+redis-cli -h 127.0.0.1 -p 6379 ping
+
+KAFKA:
+
+SET this in the docker-compose to always auto-create topics:
+
+KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"  
+

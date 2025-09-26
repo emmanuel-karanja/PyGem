@@ -1,12 +1,10 @@
-# app/shared/database/postgres_client_v3.py
-
 import asyncio
-import asyncpg
 import io
 from typing import Callable, Any, List, Optional, Tuple, Dict
 
+import asyncpg
 from app.shared.database.base import DatabaseClient
-from app.shared.retry import RetryPolicy,ExponentialBackoffRetry
+from app.shared.retry import RetryPolicy, ExponentialBackoffRetry
 from app.config.logger import JohnWickLogger
 from app.shared.metrics.metrics_collector import MetricsCollector
 
@@ -37,7 +35,7 @@ class PostgresClient(DatabaseClient):
     ):
         self.dsn = dsn
         self.logger = logger or logger
-        self.retry_policy = retry_policy or ExponentialBackoffRetry()
+        self.retry_policy: RetryPolicy = retry_policy or ExponentialBackoffRetry()
         self.semaphore = asyncio.Semaphore(max_concurrency)
         self.semaphore_timeout = semaphore_timeout
         self.batch_size = batch_size
@@ -90,9 +88,12 @@ class PostgresClient(DatabaseClient):
         await self._acquire_semaphore()
         try:
             async with self.pool.acquire() as conn:
-                result = await self.retry_policy.execute(func, *args, **kwargs)
+                result = await self.retry_policy.execute(func, conn, *args, **kwargs)
             self.metrics.increment("success")
             return result
+        except asyncio.CancelledError:
+            self.logger.warning("Query cancelled")
+            raise
         except Exception as e:
             self.metrics.increment("failure")
             self.logger.exception("Query failed", extra={"error": str(e), "args": args})

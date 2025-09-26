@@ -1,25 +1,60 @@
-from contextlib import asynccontextmanager
 from fastapi import FastAPI
-import asyncio
+from app.config.dependencies import (
+    get_redis_client,
+    get_redis_event_bus,
+    get_postgres_client,
+    get_kafka_client,
+    get_kafka_event_bus,
+)
+from app.config.settings import Settings
+from app.config.db_session import init_db
 from app.config.logger import logger
 from app.shared.health import health_router
-from app.config.init_core_services import init_core_services
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    logger.info("🚀 Starting application...")
-    redis_client, redis_event_bus, postgres_client, kafka_client, kafka_event_bus = await init_core_services()
-    yield
-    logger.info("⚠️ Shutting down application...")
-    await asyncio.gather(
-        postgres_client.stop(),
-        kafka_event_bus.stop(),
-        redis_event_bus.stop(),
-        kafka_client.stop(),
-        redis_client.close()
-    )
-    logger.info("🎯 Application shutdown complete")
+import asyncio
 
+settings = Settings()
+app = FastAPI(title="Modular Monolith FastAPI App")
 
-app = FastAPI(title="Modular Monolith FastAPI App", lifespan=lifespan)
+# Include the health check routes
 app.include_router(health_router)
 logger.info("✅ Health routes initialized")
+
+# ----------------------------
+# Startup event
+# ----------------------------
+@app.on_event("startup")
+async def startup_event():
+    # Initialize clients
+    app.state.redis_client = get_redis_client()
+    app.state.redis_event_bus = get_redis_event_bus()
+    app.state.postgres_client = get_postgres_client()
+    app.state.kafka_client = get_kafka_client()
+    app.state.kafka_event_bus = get_kafka_event_bus()
+
+    # Start all services concurrently
+    await asyncio.gather(
+        app.state.redis_client.connect(),
+        app.state.redis_event_bus.start(),
+        app.state.kafka_client.start(),
+        app.state.kafka_event_bus.start(),
+        app.state.postgres_client.start(),
+    )
+
+    # Initialize DB
+    await init_db(str(settings.postgres.get_database_url(settings.app.env_mode, for_asyncpg=False)), app_path="app")
+    logger.info("✅ Application startup complete")
+
+# ----------------------------
+# Shutdown event
+# ----------------------------
+@app.on_event("shutdown")
+async def shutdown_event():
+    # Stop all services concurrently
+    await asyncio.gather(
+        app.state.postgres_client.stop(),
+        app.state.kafka_event_bus.stop(),
+        app.state.redis_event_bus.stop(),
+        app.state.kafka_client.stop(),
+        app.state.redis_client.close(),
+    )
+    logger.info("🎯 Application shutdown complete")

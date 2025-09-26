@@ -13,6 +13,7 @@ from app.shared.retry.fixed_delay_retry import FixedDelayRetry
 class RedisEventBus(EventBus):
     """
     RedisEventBus using RedisClient for connection, retries, metrics, and JSON handling.
+    Fully cancellable.
     """
 
     def __init__(
@@ -22,17 +23,22 @@ class RedisEventBus(EventBus):
         metrics: Optional[MetricsCollector] = None,
         retry_policy: Optional[RetryPolicy] = None,
     ):
-        self.logger = logger or get_logger("RedisEventBus")
+        self.logger = logger or JohnWickLogger(name="RedisEventBus")
         self.redis_client = redis_client or RedisClient(logger=self.logger)
 
         # Channel -> list of subscriber callbacks
         self.subscribers: Dict[str, List[Callable]] = {}
+
+        # Channel -> consume task
         self._consume_tasks: Dict[str, asyncio.Task] = {}
+
+        # Channel -> subscriber tasks
+        self._subscriber_tasks: Dict[str, set[asyncio.Task]] = {}
 
         # Metrics
         self.metrics: MetricsCollector = metrics or MetricsCollector(self.logger)
 
-        # Retry policy: default to FixedDelayRetry if not provided
+        # Retry policy
         self.retry_policy: RetryPolicy = retry_policy or FixedDelayRetry(max_retries=3)
 
     async def start(self):
@@ -41,12 +47,6 @@ class RedisEventBus(EventBus):
             self.logger.info("Starting RedisEventBus...")
             await self.redis_client.connect()
             self.logger.info("✅ Redis client connected")
-
-            # Start all existing subscriptions (if any)
-            for channel, callbacks in self.subscribers.items():
-                self.logger.info(f"Initializing subscriber(s) for channel '{channel}'")
-                await self.subscribe(channel, lambda payload: None)  # no-op default callback
-
             self.logger.info("🎉 RedisEventBus started successfully")
         except Exception as exc:
             self.logger.error("Failed to start RedisEventBus", extra={"error": str(exc)})
@@ -60,7 +60,7 @@ class RedisEventBus(EventBus):
             await self.redis_client.redis.publish(channel, json.dumps(payload))
             self.logger.info("Published event", extra={"channel": channel, "payload": payload})
             if self.metrics:
-                await self.metrics.increment("published")
+                self.metrics.increment("published")
 
         try:
             await self.retry_policy.execute(_publish)
@@ -70,7 +70,7 @@ class RedisEventBus(EventBus):
                 extra={"channel": channel, "payload": payload},
             )
             if self.metrics:
-                await self.metrics.increment("failed_publish")
+                self.metrics.increment("failed_publish")
             raise
 
     async def subscribe(self, channel: str, callback: Callable):
@@ -89,23 +89,35 @@ class RedisEventBus(EventBus):
                         continue
                     payload = json.loads(message["data"])
 
+                    tasks = set()
                     for cb in self.subscribers.get(channel, []):
                         async def _cb():
                             try:
                                 await cb(payload)
+                            except asyncio.CancelledError:
+                                self.logger.warning("Subscriber callback cancelled")
+                                raise
                             except Exception as exc:
                                 self.logger.exception(
                                     "Subscriber callback failed",
                                     extra={"channel": channel, "error": str(exc)},
                                 )
                                 if self.metrics:
-                                    await self.metrics.increment("failed_consume")
+                                    self.metrics.increment("failed_consume")
 
-                        asyncio.create_task(self.retry_policy.execute(_cb))
+                        task = asyncio.create_task(self.retry_policy.execute(_cb))
+                        tasks.add(task)
+                        task.add_done_callback(lambda t: tasks.discard(t))
+
+                    self._subscriber_tasks.setdefault(channel, set()).update(tasks)
 
                     if self.metrics:
-                        await self.metrics.increment("consumed")
+                        self.metrics.increment("consumed")
                     self.logger.debug("Event consumed", extra={"channel": channel, "payload": payload})
+
+            except asyncio.CancelledError:
+                self.logger.info(f"Consume loop for channel {channel} cancelled")
+                raise
             finally:
                 await pubsub.unsubscribe(channel)
                 await pubsub.close()
@@ -115,6 +127,14 @@ class RedisEventBus(EventBus):
 
     async def stop(self):
         """Stop all subscriptions and close RedisClient"""
+
+        # Cancel subscriber tasks first
+        for channel, tasks in self._subscriber_tasks.items():
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Cancel consume loops
         for channel, task in self._consume_tasks.items():
             task.cancel()
             try:

@@ -11,4 +11,4 @@ tenacity>=8.0          # optional, if using a retry library
 SQLAlchemy>=2.0.43
 psycopg2-binary>=2.9.9 # PostgreSQL driver for sync queries (optional if only asyncpg used)
 colorama>=0.4.6        # For colored console logs
-loguru>= 0.7.3
+structlog>=23.3.0
