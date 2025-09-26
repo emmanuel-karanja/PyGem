@@ -1,8 +1,8 @@
-from typing import Callable
+from typing import Callable, Protocol
 
-class EventBus:
+class EventBus(Protocol):
     async def publish(self, event_name: str, payload: dict):
         raise NotImplementedError
 
-    async def subscribe(self, event_name: str, callback: Callable):
+    async def on(self, event_name: str, callback: Callable):
         raise NotImplementedError

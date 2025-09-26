@@ -1,9 +1,10 @@
 import asyncio
 from typing import Any, Awaitable, Callable
+from app.shared.annotations import ApplicationScoped
 from app.shared.retry.base import RetryPolicy
 from app.shared.logger import JohnWickLogger
 
-
+@ApplicationScoped
 class FixedDelayRetry(RetryPolicy):
     def __init__(self, max_retries: int = 3, delay: float = 1.0):
         self.max_retries = max_retries

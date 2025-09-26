@@ -2,11 +2,12 @@ import asyncio
 import inspect
 from typing import Callable, Dict, List, Any
 
-from app.shared.event_bus.base import EventBus
+from app.shared.messaging import EventBus
 from app.shared.logger import  JohnWickLogger
 from app.shared.metrics.metrics_collector import MetricsCollector
+from app.shared.messaging.annotations import ApplicationScoped
 
-
+@ApplicationScoped
 class InProcessEventBus(EventBus):
     """
     Lightweight in-memory event bus for local pub/sub communication.

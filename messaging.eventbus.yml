@@ -1,0 +1,14 @@
+messaging:
+  eventbus:
+    transport: kafka  # options: redis, kafka, memory
+
+kafka:
+  bootstrap_servers: "127.0.0.1:9092"
+  group_id: "order-service-group"
+  topic: "orders"
+  dlq_topic: "orders_dlq"
+
+redis:
+  host: "127.0.0.1"
+  port: 6379
+  db: 0
