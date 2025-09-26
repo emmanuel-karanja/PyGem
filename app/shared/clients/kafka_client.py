@@ -3,7 +3,7 @@ import json
 from typing import Optional, List, AsyncIterator, Tuple
 
 from aiokafka import AIOKafkaProducer, AIOKafkaConsumer
-from aiokafka import AIOKafkaAdminClient,NewTopic
+from aiokafka.admin import AIOKafkaAdminClient,NewTopic
 
 from app.shared.annotations.core import ApplicationScoped
 from app.shared.logger import JohnWickLogger
