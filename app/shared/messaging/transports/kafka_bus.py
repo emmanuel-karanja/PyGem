@@ -8,12 +8,13 @@ from app.shared.metrics.metrics_collector import MetricsCollector
 from app.shared.retry import RetryPolicy, FixedDelayRetry
 from app.shared.messaging.base import EventBus
 from app.shared.clients import KafkaClient
+from app.shared.metrics.metrics_schema import KafkaMetrics
 
 
-@ApplicationScoped
+@ApplicationScoped #singleton
 class KafkaEventBus(EventBus):
     """
-    Async Node.js-style EventEmitter interface over Kafka using KafkaClient.
+    Async EventBus ontop of Kafka using KafkaClient.
     Handles subscriptions, publishing, and per-topic consume loops.
     """
 
@@ -29,10 +30,10 @@ class KafkaEventBus(EventBus):
         self.metrics = metrics or self.kafka_client.metrics
         self.retry_policy = retry_policy or FixedDelayRetry(max_retries=3)
 
-        # Subscribers per topic
+       
         self._subscribers: Dict[str, list[Callable[[str, str, dict], Awaitable[None]]]] = {}
-        self._subscriber_tasks: Dict[str, Set[asyncio.Task]] = {}
-        self._consume_tasks: Dict[str, asyncio.Task] = {}
+        self._subscriber_tasks: Dict[str, Set[asyncio.Task]] = {} #tasks to run callbacks for the subscribers mapped by topic
+        self._consume_tasks: Dict[str, asyncio.Task] = {}  #one task per topic for the consume loop i.e a collection of consume_loop tasks
 
         self._running = False
         self._start_lock = asyncio.Lock()
@@ -45,9 +46,10 @@ class KafkaEventBus(EventBus):
 
             await self.kafka_client.start()
             self._running = True
-            self.logger.info("KafkaEventBus started")
+            self.logger.info("KafkaEventBus started...")
 
-            # Start consume loops for registered topics
+            # Start consume loops for registered topics 
+            # Subscribers per topic, do not start a new consume_loop task if there is already one running for a given topic
             for topic in self._subscribers.keys():
                 if topic not in self._consume_tasks:
                     self._consume_tasks[topic] = asyncio.create_task(self._consume_loop(topic))
@@ -109,13 +111,14 @@ class KafkaEventBus(EventBus):
             await self.kafka_client.produce(topic=topic, value=payload, key=key)
 
         try:
+            # do retries only if a retry policy has been set else, just call _publish directly
             await (self.retry_policy.execute(_publish) if self.retry_policy else _publish())
             if self.metrics:
-                self.metrics.increment("published")
+                self.metrics.increment(KafkaMetrics.PRODUCED)
         except Exception as exc:
             self.logger.error("Failed to publish", extra={"topic": topic, "error": str(exc)})
             if self.metrics:
-                self.metrics.increment("failed_publish")
+                self.metrics.increment(KafkaMetrics.FAILED_PRODUCE)
             raise
 
 
@@ -131,6 +134,7 @@ class KafkaEventBus(EventBus):
                 continue
 
             tasks = set()
+            # create a task for each callback for the message and schedule it
             for cb in self._subscribers.get(topic, []):
                 async def _cb(cb=cb):
                     try:
