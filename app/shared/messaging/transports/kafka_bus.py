@@ -1,5 +1,6 @@
 import asyncio
 import inspect
+import os
 from typing import Callable, Dict, Awaitable, Set
 
 from app.shared.annotations.core import ApplicationScoped
@@ -79,6 +80,17 @@ class KafkaEventBus(EventBus):
         if not self._running:
             await self.start()
 
+    async def _ensure_topic_exists(self, topic: str):
+        """
+        Create topic in dev environment using KafkaClient helper.
+        """
+        env = os.getenv("APP_ENV", "dev")  # default to dev
+        if env != "dev":
+            return  # Only create topics in dev
+
+        # Use KafkaClient's method to create topic
+        await self.kafka_client.create_topics([topic])
+
     # --- Subscribe ---
     async def subscribe(
         self,
@@ -90,7 +102,10 @@ class KafkaEventBus(EventBus):
         Starts the bus and consume loop for the topic automatically.
         """
         await self._ensure_started()
-
+        
+        # DEV: ensure topic exists
+        await self._ensure_topic_exists(topic)
+        
         self._subscribers.setdefault(topic, []).append(callback)
         self.logger.info(
             "Subscription registered",

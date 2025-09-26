@@ -3,6 +3,7 @@ import json
 from typing import Optional, List, AsyncIterator, Tuple
 
 from aiokafka import AIOKafkaProducer, AIOKafkaConsumer
+from aiokafka import AIOKafkaAdminClient,NewTopic
 
 from app.shared.annotations.core import ApplicationScoped
 from app.shared.logger import JohnWickLogger
@@ -143,6 +144,8 @@ class KafkaClient:
             self.metrics.increment(KafkaMetrics.FAILED_PROCESS)
             raise
 
+    # subscribe an array of topics after the client has already been started this is good for the event bus
+    # a new topic will only be created if auto.create.topics.enable=true is set on the broker config
     async def subscribe_to_topics(self, topics: List[str]):
         """Subscribe the consumer to multiple topics."""
         if not self._running:
@@ -151,3 +154,39 @@ class KafkaClient:
             raise RuntimeError("Kafka consumer not initialized")
         self._consumer.subscribe(topics)
         self.logger.info("Consumer subscribed to topics", extra={"topics": topics})
+    
+    # Create topics if they don't exist, this is purely for dev and experimentation, in prod, create this on the broker
+    # And set the optimal replication level
+    async def create_topics(
+        self,
+        topics: list[str],
+        num_partitions: int = 5,# pass this from wherever, possibly from the configs in the yml file
+        replication_factor: int = 1, 
+    ):
+        """
+        Dynamically create Kafka topics if they don't already exist.
+        """
+        if not self._running:
+            await self.start()  # ensure bootstrap_servers is available
+
+        admin = AIOKafkaAdminClient(bootstrap_servers=self.bootstrap_servers)
+        await admin.start()
+        try:
+            # Get existing topics to avoid errors
+            existing = await admin.list_topics()
+            new_topics = [
+                NewTopic(name=t, num_partitions=num_partitions, replication_factor=replication_factor)
+                for t in topics if t not in existing
+            ]
+
+            if not new_topics:
+                self.logger.info("All topics already exist", extra={"topics": topics})
+                return
+
+            await admin.create_topics(new_topics)
+            self.logger.info("Topics created successfully", extra={"topics": [t.name for t in new_topics]})
+        except Exception as e:
+            self.logger.error("Failed to create topics", extra={"error": str(e), "topics": topics})
+            raise
+        finally:
+            await admin.close()
