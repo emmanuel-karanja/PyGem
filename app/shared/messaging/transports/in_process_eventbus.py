@@ -5,7 +5,7 @@ from typing import Callable, Dict, List, Any
 from app.shared.messaging import EventBus
 from app.shared.logger import  JohnWickLogger
 from app.shared.metrics.metrics_collector import MetricsCollector
-from annotations import ApplicationScoped
+from app.shared.annotations import ApplicationScoped
 
 @ApplicationScoped
 class InProcessEventBus(EventBus):
@@ -14,11 +14,11 @@ class InProcessEventBus(EventBus):
     Suitable for development, testing, and small-scale systems.
     """
 
-    def __init__(self, max_retries: int = 3, logger: JohnWickLogger = None):
+    def __init__(self, max_retries: int = 3, logger: JohnWickLogger = None, metrics: MetricsCollector=None):
         self.subscribers: Dict[str, List[Callable[[Any], Any]]] = {}
         self.max_retries = max_retries
         self.logger = logger or JohnWickLogger(name="InProcessEventBus")
-        self.metrics = MetricsCollector(self.logger)
+        self.metrics = metrics
 
     async def publish(self, event_name: str, payload: dict):
         """
