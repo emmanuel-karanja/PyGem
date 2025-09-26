@@ -45,28 +45,52 @@ class KafkaEventBus:
         self.retry_policy: Optional[RetryPolicy] = retry_policy or FixedDelayRetry(max_retries=3)
 
     async def start(self):
-        """Start Kafka producer and consumers"""
+        """Start Kafka producer and consumers and launch consume tasks."""
+        
+        # Start the Kafka client (producer + internal setup)
         await self.kafka_client.start()
         self.logger.info("KafkaEventBus started")
 
+        # Start all consumers for subscribed topics
+        for topic, callbacks in self._subscriber_tasks.items():
+            if topic not in self._consume_tasks:
+                task = asyncio.create_task(self._consume_loop(topic, callbacks))
+                self._consume_tasks[topic] = task
+                self.logger.debug(f"Consume loop started for topic {topic}")
+
     async def stop(self):
-        """Stop all subscriber tasks, consume tasks, and Kafka client"""
-        # Cancel subscriber tasks
+        """Stop all subscriber tasks, consume tasks, and Kafka client."""
+
+        # 1️. Cancel subscriber tasks
         for topic, tasks in self._subscriber_tasks.items():
             for task in tasks:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
+        self._subscriber_tasks.clear()
 
-        # Cancel consume tasks
+        # 2️. Cancel consume tasks
         for topic, task in self._consume_tasks.items():
             task.cancel()
             try:
                 await task
             except asyncio.CancelledError:
                 self.logger.debug(f"Consume task for topic {topic} cancelled")
+        self._consume_tasks.clear()
+
+        # 3️. Stop and close Kafka client
+        if self.kafka_client.consumer:
+            await self.kafka_client.consumer.stop()
+            await self.kafka_client.consumer.close()
+            self.kafka_client.consumer = None
+
+        if self.kafka_client.producer:
+            await self.kafka_client.producer.stop()
+            await self.kafka_client.producer.close()
+            self.kafka_client.producer = None
 
         await self.kafka_client.stop()
         self.logger.info("KafkaEventBus stopped")
+
 
     async def publish(self, key: str, payload: dict, topic: Optional[str] = None):
         """Publish a message using KafkaClient, with optional retry and metrics"""
