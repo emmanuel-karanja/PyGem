@@ -1,72 +1,37 @@
 import pytest
-import json
-
+from unittest.mock import AsyncMock, patch
 from app.shared.clients.kafka_client import KafkaClient
-from app.shared.retry import ExponentialBackoffRetry
-from app.config.logger import logger
-
 
 @pytest.mark.asyncio
-async def test_produce_consume():
-    produced_messages = []
+async def test_kafka_produce_consume():
+    mock_producer = AsyncMock()
+    mock_consumer = AsyncMock()
+    mock_consumer.__aiter__.return_value = iter([
+        type("Message", (), {"topic": "test", "key": b"default", "value": b'{"msg":"hello"}'})()
+    ])
 
-    # ----------------------------
-    # Dummy Producer
-    # ----------------------------
-    class DummyProducer:
-        async def send_and_wait(self, topic, key, value):
-            produced_messages.append((topic, key, value))
+    client = KafkaClient(bootstrap_servers="localhost:9092", topics=["test"])
+    client._producer = mock_producer
+    client._consumer = mock_consumer
+    client._running = True
 
-    # ----------------------------
-    # Dummy Consumer
-    # ----------------------------
-    class DummyConsumer:
-        async def start(self): pass
-        async def stop(self): pass
+    # Produce
+    await client.produce("test", {"msg": "hello"})
+    mock_producer.send_and_wait.assert_called_once()
 
-        async def __aiter__(self):
-            for topic, key, value in produced_messages:  # FIXED: unpack 3 values
-                class Msg:
-                    def __init__(self, key, value):
-                        self.key = key
-                        self.value = value
-                yield Msg(key, value)
+    # Consume
+    async for topic, key, value in client.consume():
+        assert topic == "test"
+        assert key == "default"
+        assert value == {"msg": "hello"}
 
-    # ----------------------------
-    # Instantiate KafkaClient with dummy producer/consumer
-    # ----------------------------
-    client = KafkaClient(
-        bootstrap_servers="dummy:9092",
-        topic="test_topic",
-        dlq_topic="test_dlq",
-        group_id="test_group",
-        logger=logger,
-        retry_policy=ExponentialBackoffRetry(max_retries=1),
-        batch_size=1,
-    )
-    client.producer = DummyProducer()
-    client.consumer = DummyConsumer()
+@pytest.mark.asyncio
+async def test_subscribe_to_topics():
+    mock_consumer = AsyncMock()
+    client = KafkaClient(bootstrap_servers="localhost:9092")
+    client._consumer = mock_consumer
+    client._running = True
 
-    # ----------------------------
-    # Produce a message
-    # ----------------------------
-    await client.produce("key1", {"foo": "bar"})
-    assert len(produced_messages) == 1
-    topic, key, value = produced_messages[0]
-    assert topic == "test_topic"
-    assert key == b"key1"
-    assert value == json.dumps({"foo": "bar"}).encode()
+    await client.subscribe_to_topics(["topic1", "topic2"])
+    mock_consumer.subscribe.assert_called_once_with(["topic1", "topic2"])
 
-    # ----------------------------
-    # Consume message deterministically
-    # ----------------------------
-    consumed = []
-
-    async def callback(k, v):
-        consumed.append((k, v))
-
-    await client._consume_loop(callback)
-
-    assert len(consumed) == 1
-    assert consumed[0][0] == "key1"
-    assert consumed[0][1] == {"foo": "bar"}

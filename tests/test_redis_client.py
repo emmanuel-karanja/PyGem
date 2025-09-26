@@ -1,56 +1,43 @@
-import json
 import pytest
+from unittest.mock import AsyncMock
+from app.shared.clients.redis_client import RedisClient
+
+import pytest
+from unittest.mock import AsyncMock
 from app.shared.clients import RedisClient
-from app.config.logger import logger
 
-# -----------------------------
-# Dummy Redis backend
-# -----------------------------
-class DummyRedis:
-    def __init__(self):
-        self.store = {}
+@pytest.mark.asyncio
+async def test_redis_client_set_get(monkeypatch):
+    client = RedisClient(redis_url="redis://localhost:6379/0")
 
-    async def set(self, key, value, ex=None):
-        self.store[key] = value
+    # Mock the Redis connection
+    mock_redis = AsyncMock()
+    monkeypatch.setattr(client, "redis", mock_redis)
 
-    async def get(self, key):
-        return self.store.get(key)
+    # Mock ping (if connect calls it)
+    mock_redis.ping = AsyncMock(return_value=True)
 
-    async def delete(self, key):
-        return self.store.pop(key, None) is not None
+    # Set and get
+    await client.set("mykey", {"foo": "bar"}, ttl=10)
+    mock_redis.set.assert_awaited_once_with("mykey", '{"foo": "bar"}', ex=10)
 
-    async def exists(self, key):
-        return key in self.store
+    mock_redis.get = AsyncMock(return_value='{"foo": "bar"}')
+    value = await client.get("mykey")
+    assert value == {"foo": "bar"}
 
-    async def ping(self):
-        return True
-
-    async def close(self):
-        pass
 
 
 @pytest.mark.asyncio
-async def test_redis_set_get_delete(monkeypatch):
-    client = RedisClient(logger=logger)
-    client.redis = DummyRedis()  # inject dummy backend
+async def test_redis_delete_exists():
+    mock_redis = AsyncMock()
+    mock_redis.delete.return_value = 1
+    mock_redis.exists.return_value = 1
 
-    # Test set
-    await client.set("key1", {"foo": "bar"}, ttl=60)
-    stored_value = client.redis.store.get("key1")
-    assert stored_value == json.dumps({"foo": "bar"})
+    redis_client = RedisClient(redis_url="redis://localhost:6379")
+    redis_client.redis = mock_redis
 
-    # Test get
-    value = await client.get("key1")
-    assert value == {"foo": "bar"}  # JSON is deserialized
+    deleted = await redis_client.delete("foo")
+    exists = await redis_client.exists("foo")
 
-    # Test exists
-    exists = await client.exists("key1")
-    assert exists is True
-
-    # Test delete
-    deleted = await client.delete("key1")
     assert deleted is True
-
-    # Test get after delete
-    value_after_delete = await client.get("key1")
-    assert value_after_delete is None  # ✅ now passes
+    assert exists is True

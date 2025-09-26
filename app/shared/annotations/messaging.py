@@ -1,48 +1,45 @@
 import asyncio
 from functools import wraps
-from typing import Callable, List, Tuple
-from app.shared.annotations.core import get_subscribe_registry
+from typing import Callable, Tuple, Type, Optional, Set
+
 from app.shared.messaging.event_bus_factory import EventBusFactory
+from app.shared.annotations.core import _SINGLETONS
 
-# Deferred consumer registry
-_CONSUMER_REGISTRY: List[Tuple[str, Callable]] = []
+# --- Deferred consumer registry ---
+# Stores tuples: (topic, class type, method name)
+_CONSUMER_REGISTRY: Set[Tuple[str, Type, str]] = set()
 
 
-def EventBusBinding(func):
-    """Inject EventBus into function parameter if missing."""
+# -------------------
+# EventBus Injection
+# -------------------
+def EventBusBinding(func: Callable):
+    """Inject EventBus into a function if missing."""
     @wraps(func)
     async def wrapper(*args, **kwargs):
         if "event_bus" not in kwargs:
-            factory_instance = EventBusFactory()  # or Inject(EventBusFactory)
-            kwargs['event_bus'] = factory_instance.create_event_bus()
+            kwargs["event_bus"] = EventBusFactory().create_event_bus()
         return await func(*args, **kwargs)
     return wrapper
 
 
-def Subscribe(event_name: str):
-    """Mark function/method as subscriber (auto-registered at bus creation)."""
-    def decorator(func: Callable):
-        get_subscribe_registry().setdefault(event_name, []).append(func)
-        return func
-    return decorator
-
-
+# -------------------
+# Producer Decorator
+# -------------------
 def Producer(topic: str):
-    """Inject EventBus producer to a class and optionally provide publish()."""
+    """Class decorator to inject EventBus and provide automatic `publish()` method."""
     def decorator(cls):
         orig_init = cls.__init__
 
         @wraps(orig_init)
         def __init__(self, *args, **kwargs):
-            if 'event_bus' not in kwargs:
-                factory_instance = EventBusFactory()
-                kwargs['event_bus'] = factory_instance.create_event_bus()
+            if "event_bus" not in kwargs:
+                kwargs["event_bus"] = EventBusFactory().create_event_bus()
             self._topic = topic
             orig_init(self, *args, **kwargs)
 
         cls.__init__ = __init__
 
-        # Provide convenience publish method if not defined
         if not hasattr(cls, "publish"):
             async def publish(self, payload: dict):
                 await self.event_bus.publish(self._topic, payload)
@@ -52,33 +49,73 @@ def Producer(topic: str):
     return decorator
 
 
+# -------------------
+# Consumer Decorator
+# -------------------
 def Consumer(topic: str):
-    """Marks a class method as a consumer."""
+    """Marks a class method as a consumer to a topic."""
     def decorator(func: Callable):
-        cls_name = func.__qualname__.split(".")[0]
-        _CONSUMER_REGISTRY.append((topic, cls_name, func.__name__))
+        cls_type: Optional[Type] = None
+        qualname = func.__qualname__
+        if "." in qualname:
+            cls_name = qualname.split(".")[0]
+            # Lazy resolution: store cls_type as None and resolve later
+            for cls in _SINGLETONS.keys():
+                if cls.__name__ == cls_name:
+                    cls_type = cls
+                    break
+
+        # Prevent duplicates
+        _CONSUMER_REGISTRY.add((topic, cls_type, func.__name__))
 
         @wraps(func)
         async def wrapper(*args, **kwargs):
-            # Optional: log invocation
-            instance = args[0]  # first arg is 'self'
+            instance = args[0]  # self
             if hasattr(instance, "logger"):
-                instance.logger.info(f"Subscriber called: {cls_name}.{func.__name__} with args={args[1:]}, kwargs={kwargs}")
+                instance.logger.info(
+                    f"Subscriber called: {func.__qualname__} args={args[1:]}, kwargs={kwargs}"
+                )
             return await func(*args, **kwargs)
-
         return wrapper
     return decorator
 
+
+# -------------------
+# Consumer Registration
+# -------------------
 async def register_consumers():
-    """Bind all deferred consumers to the EventBus after singletons exist."""
+    """Bind all deferred consumers to the EventBus safely."""
     event_bus = EventBusFactory().create_event_bus()
 
-    for topic, cls_name, method_name in _CONSUMER_REGISTRY:
-        # Look up the singleton instance
-        from app.shared.annotations.core import _SINGLETONS
-        instance = next((obj for cls, obj in _SINGLETONS.items() if cls.__name__ == cls_name), None)
-        if instance:
-            callback = getattr(instance, method_name)
-            await event_bus.subscribe(topic, callback)
-            if hasattr(instance, "logger"):
-                instance.logger.info(f"Subscribed {cls_name}.{method_name} to {topic}")
+    for topic, cls_type, method_name in list(_CONSUMER_REGISTRY):
+        # Lazy resolve class if None
+        if cls_type is None:
+            for cls, instance in _SINGLETONS.items():
+                if method_name in dir(instance):
+                    cls_type = cls
+                    break
+
+        if cls_type is None:
+            continue
+
+        instance = _SINGLETONS.get(cls_type)
+        if instance is None:
+            continue
+
+        callback = getattr(instance, method_name)
+
+        # Optional: wrap callback for metrics / retry here
+        await event_bus.subscribe(topic, callback)
+
+        if hasattr(instance, "logger"):
+            instance.logger.info(
+                f"Subscribed {cls_type.__name__}.{method_name} to topic '{topic}'"
+            )
+
+
+# -------------------
+# Synchronous wrapper
+# -------------------
+def subscribe_all_sync():
+    """Schedule consumer registration on the event loop."""
+    asyncio.create_task(register_consumers())

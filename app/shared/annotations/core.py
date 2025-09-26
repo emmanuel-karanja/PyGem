@@ -1,8 +1,9 @@
 import inspect
 from functools import wraps
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List,Type
 
 _SINGLETONS: Dict[type, Any] = {}
+_REQUEST_SCOPE: Dict[Type, Any] = {}
 _SUBSCRIBE_REGISTRY: Dict[str, List[Callable]] = {}
 
 def ApplicationScoped(cls):
@@ -26,6 +27,13 @@ def Inject(cls_or_factory):
         return cls_or_factory()
     else:
         raise ValueError("Inject expects a class or factory callable")
+
+def RequestScoped(cls: Type):
+    """Mark a class to have request-scoped lifecycle."""
+    @wraps(cls)
+    def wrapper(*args, **kwargs):
+        return cls(*args, **kwargs)
+    return wrapper
 
 def get_subscribe_registry() -> Dict[str, List[Callable]]:
     return _SUBSCRIBE_REGISTRY
