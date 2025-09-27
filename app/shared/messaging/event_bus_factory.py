@@ -10,6 +10,24 @@ from app.shared.clients import RedisClient, KafkaClient
 from app.shared.annotations.core import ApplicationScoped
 from app.shared.registry import _CONSUMER_REGISTRY, _PRODUCER_REGISTRY, _SINGLETONS
 
+VALID_TRANSPORTS = {"memory", "redis", "kafka"}
+
+# fields that must exist
+REQUIRED = {
+    "redis": ["host", "port"],
+    "kafka": ["bootstrap_servers"],
+}
+
+# fields that can default
+DEFAULTS = {
+    "redis": {"db": 0},
+    "kafka": {
+        "topic": "default-topic",
+        "dlq_topic": "default-dlq",
+        "group_id": "default-group",
+        "max_concurrency": 5,
+    },
+}
 
 @ApplicationScoped
 class EventBusFactory:
@@ -19,10 +37,11 @@ class EventBusFactory:
 
     @staticmethod
     def load_config() -> Dict[str, Any]:
-        """Load messaging configuration from YAML or Properties files."""
+        """Load and validate messaging configuration from YAML or Properties files."""
         logger = JohnWickLogger("EventBusFactory")
         config: Dict[str, Any] = {}
 
+        # --- Load config file ---
         if os.path.exists("messaging.eventbus.yml"):
             with open("messaging.eventbus.yml", "r") as f:
                 config = yaml.safe_load(f) or {}
@@ -34,7 +53,58 @@ class EventBusFactory:
             logger.info("Loaded messaging config from Properties")
         else:
             logger.warning("No messaging config file found, defaulting to InMemoryEventBus")
+            config = {"messaging": {"eventbus": {"transport": "memory"}}}
 
+        # --- Validate messaging.eventbus transport ---
+        messaging_cfg = config.setdefault("messaging", {}).setdefault("eventbus", {})
+        transport = messaging_cfg.get("transport", "memory").lower()
+
+        if transport not in VALID_TRANSPORTS:
+            raise ValueError(
+                f"Invalid transport '{transport}'. Must be one of {', '.join(VALID_TRANSPORTS)}"
+            )
+
+        # --- Transport-specific validation ---
+        if transport == "redis":
+            redis_cfg = config.setdefault("redis", {})
+
+            # required
+            for key in REQUIRED["redis"]:
+                if key not in redis_cfg:
+                    raise ValueError(f"Missing required Redis config: '{key}'")
+
+            # defaults
+            for key, default_val in DEFAULTS["redis"].items():
+                if key not in redis_cfg:
+                    redis_cfg[key] = default_val
+                    logger.warning(
+                        f"Redis config missing '{key}', using default '{default_val}'"
+                    )
+
+            logger.info("Validated Redis configuration")
+
+        elif transport == "kafka":
+            kafka_cfg = config.setdefault("kafka", {})
+
+            # required
+            for key in REQUIRED["kafka"]:
+                if key not in kafka_cfg:
+                    raise ValueError(f"Missing required Kafka config: '{key}'")
+
+            # defaults
+            for key, default_val in DEFAULTS["kafka"].items():
+                if key not in kafka_cfg:
+                    kafka_cfg[key] = default_val
+                    logger.warning(
+                        f"Kafka config missing '{key}', using default '{default_val}'"
+                    )
+
+            logger.info("Validated Kafka configuration")
+
+        else:
+            logger.info("Using InMemoryEventBus, no extra config needed")
+
+        logger.info("Configuration validated successfully")
         return config
 
     @classmethod
