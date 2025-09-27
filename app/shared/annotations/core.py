@@ -1,11 +1,7 @@
 import inspect
 from functools import wraps
 from typing import Any, Callable, Dict, List,Type
-
-_SINGLETONS: Dict[type, Any] = {}
-_REQUEST_SCOPE: Dict[Type, Any] = {}
-_SUBSCRIBE_REGISTRY: Dict[str, List[Callable]] = {}
-
+from app.shared.registry import _SINGLETONS
 def ApplicationScoped(cls):
     """Mark a class as a singleton-managed bean."""
     @wraps(cls)
@@ -34,6 +30,3 @@ def RequestScoped(cls: Type):
     def wrapper(*args, **kwargs):
         return cls(*args, **kwargs)
     return wrapper
-
-def get_subscribe_registry() -> Dict[str, List[Callable]]:
-    return _SUBSCRIBE_REGISTRY

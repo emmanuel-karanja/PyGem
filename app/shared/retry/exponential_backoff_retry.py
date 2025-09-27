@@ -1,6 +1,6 @@
 import asyncio
 from typing import Any, Awaitable, Callable
-from app.shared.annotations import ApplicationScoped
+from app.shared.annotations.core import ApplicationScoped
 from app.shared.retry.base import RetryPolicy
 from app.shared.logger import JohnWickLogger
 

@@ -7,11 +7,13 @@ from typing import Dict, Any
 from app.shared.logger import JohnWickLogger
 from app.shared.metrics.metrics_collector import MetricsCollector
 from app.shared.clients import RedisClient, KafkaClient
-from app.shared.annotations import ApplicationScoped, get_subscribe_registry
+from app.shared.annotations.core import ApplicationScoped
+from app.shared.registry import _CONSUMER_REGISTRY, _PRODUCER_REGISTRY, _SINGLETONS
+
 
 @ApplicationScoped
 class EventBusFactory:
-    """Factory for creating EventBus instances based on configuration."""
+    """Factory for creating and wiring EventBus instances."""
 
     _event_bus: Any = None
 
@@ -56,6 +58,7 @@ class EventBusFactory:
             redis_url = f"redis://{redis_cfg.get('host', '127.0.0.1')}:{int(redis_cfg.get('port', 6379))}/{int(redis_cfg.get('db', 0))}"
             redis_client = RedisClient(redis_url=redis_url)
             cls._event_bus = RedisEventBus(redis_client=redis_client, logger=logger, metrics=metrics)
+            logger.info(f"Created RedisEventBus instance with URL {redis_url}")
 
         elif transport == "kafka":
             from app.shared.messaging.transports.kafka_bus import KafkaEventBus
@@ -68,22 +71,49 @@ class EventBusFactory:
                 max_concurrency=int(kafka_cfg.get("max_concurrency", 5))
             )
             cls._event_bus = KafkaEventBus(kafka_client=kafka_client, logger=logger, metrics=metrics)
+            logger.info(f"Created KafkaEventBus instance with bootstrap_servers={kafka_cfg.get('bootstrap_servers')}")
 
         else:
             from app.shared.messaging.transports.in_process_eventbus import InProcessEventBus
-            logger.info("Using InMemoryEventBus as fallback")
             cls._event_bus = InProcessEventBus(logger=logger, metrics=metrics)
+            logger.info("Created InMemoryEventBus instance as fallback")
 
-        # --- Auto-bind annotated subscribers ---
-        cls._bind_annotated_subscribers(cls._event_bus)
         return cls._event_bus
 
     @classmethod
-    def _bind_annotated_subscribers(cls, event_bus: Any):
-        """Register all functions decorated with @Subscribe to the EventBus."""
-        registry: Dict[str, list] = get_subscribe_registry()
-        for event_name, callbacks in registry.items():
-            for callback in callbacks:
-                # Ensure we await async subscribe
-                if hasattr(event_bus.subscribe, "__call__"):
-                    asyncio.create_task(event_bus.subscribe(event_name, callback))
+    def bootstrap(cls):
+        """Bind producers and consumers to the EventBus."""
+        event_bus = cls.create_event_bus()
+        logger = JohnWickLogger("EventBusFactory")
+
+        logger.info("Bootstrapping producers and consumers...")
+
+        # --- Wire producers ---
+        for producer_cls in _PRODUCER_REGISTRY:
+            instance = _SINGLETONS.get(producer_cls)
+            if not instance:
+                instance = producer_cls()
+                _SINGLETONS[producer_cls] = instance
+            instance.event_bus = event_bus
+            logger.info(f"Bound producer {producer_cls.__name__} to EventBus")
+
+        # --- Wire consumers ---
+        for topic, cls_type, method_name in _CONSUMER_REGISTRY:
+            if not cls_type:
+                logger.warning(f"Skipping consumer {method_name} — no class resolved")
+                continue
+
+            instance = _SINGLETONS.get(cls_type)
+            if not instance:
+                instance = cls_type()
+                _SINGLETONS[cls_type] = instance
+
+            method = getattr(instance, method_name, None)
+            if method:
+                event_bus.subscribe(topic, method)
+                logger.info(f"Registered consumer {cls_type.__name__}.{method_name} for topic {topic}")
+            else:
+                logger.warning(f"Consumer method {method_name} not found on {cls_type.__name__}")
+
+        logger.info("EventBusFactory bootstrap complete ")
+        return event_bus

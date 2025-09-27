@@ -4,10 +4,7 @@ from typing import Callable, Tuple, Type, Optional, Set
 
 from app.shared.messaging.event_bus_factory import EventBusFactory
 from app.shared.annotations.core import _SINGLETONS
-
-# --- Deferred consumer registry ---
-# Stores tuples: (topic, class type, method name)
-_CONSUMER_REGISTRY: Set[Tuple[str, Type, str]] = set()
+from app.shared.registry import _PRODUCER_REGISTRY,_SINGLETONS,_CONSUMER_REGISTRY
 
 
 # -------------------

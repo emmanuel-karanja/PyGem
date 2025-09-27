@@ -1,5 +1,7 @@
 from app.shared.annotations.core import RequestScoped
-from app.shared.annotations import ApplicationScoped, LoggerBinding, Producer
+from app.shared.annotations.core import ApplicationScoped
+from app.shared.annotations.logging import LoggerBinding
+from app.shared.annotations.messaging import Producer
 from app.shared.logger import JohnWickLogger
 
 

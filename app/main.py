@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from app.shared.annotations.messaging import _CONSUMER_REGISTRY, register_consumers
-from app.shared.annotations import Inject
+from app.shared.annotations.core import Inject
 from app.orders.order_service import OrderService
 from app.notifications.notifications_service import NotificationService
 from app.shared.messaging.event_bus_factory import EventBusFactory
