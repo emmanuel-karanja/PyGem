@@ -1,6 +1,6 @@
 messaging:
   eventbus:
-    transport: memory  # options: redis, kafka, memory
+    transport: kafka  # options: redis, kafka, memory
 
 kafka:
   bootstrap_servers: "127.0.0.1:9092"

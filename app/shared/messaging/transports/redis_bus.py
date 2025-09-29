@@ -13,9 +13,11 @@ from app.shared.annotations.core import ApplicationScoped
 
 @ApplicationScoped
 class RedisEventBus(EventBus):
-    """
-    Node.js EventEmitter-like interface over Redis Pub/Sub.
-    Directly manages Redis connections for Pub/Sub only.
+    """Redis Pub/Sub. Directly manages Redis connections for Pub/Sub only.
+       Why?
+       1. Once a connection issues a SUBSCRIBE or PSUBSCRIBE command, that connection becomes dedicated to Pub/Sub.
+       2. Redis will only send you Pub/Sub messages over that connection — it will no longer accept normal commands (like GET/SET).
+       3. This is by design so messages can be delivered in real time without being blocked by command round-trips.
     """
 
     def __init__(
