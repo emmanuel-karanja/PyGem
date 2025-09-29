@@ -101,8 +101,12 @@ function Start-Docker {
     }
 
     if ($toStart) {
-        Write-Host "Starting Docker containers from $composeFile..."
-        docker compose up -d
+        Write-Host "📥 Pulling Docker images from $composeFile..."
+        docker compose -f $composeFile pull
+
+        Write-Host "🚀 Starting Docker containers from $composeFile..."
+        docker compose -f $composeFile up -d
+
         Write-Host "✅ Docker containers started"
     } else {
         Write-Host "All containers are already running."
