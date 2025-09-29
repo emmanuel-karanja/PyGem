@@ -124,7 +124,7 @@ class KafkaClient:
 
         try:
             # Async iteration over the messages in the consumer
-            # This avoids the weird, complex,spaghettish code from earlier. My lord, I am getting a headache thinking about it
+            # This avoids the weird, complex,spaghettish code from earlier that used callbacks.
             # Backpressure friendly – Your loop only consumes when ready, doesn’t overwhelm downstream systems.
             # Cancel-friendly – You can stop consuming gracefully with asyncio.CancelledError.
             # Composable – Can combine multiple async iterators (e.g., consume from multiple topics or Kafka + HTTP stream) 
@@ -157,12 +157,7 @@ class KafkaClient:
     
     # Create topics if they don't exist, this is purely for dev and experimentation, in prod, create this on the broker
     # And set the optimal replication level
-    async def create_topics(
-        self,
-        topics: list[str],
-        num_partitions: int = 5,# pass this from wherever, possibly from the configs in the yml file
-        replication_factor: int = 1, 
-    ):
+    async def create_topics(self,topics: list[str],num_partitions: int = 5,replication_factor: int = 1, ):
         """
         Dynamically create Kafka topics if they don't already exist.
         """

@@ -1,9 +1,9 @@
 import asyncio
 import json
 from typing import Callable, Dict, List, Optional, Awaitable
+import redis.asyncio as aioredis
 
 from app.shared.messaging import EventBus
-from app.shared.clients import RedisClient
 from app.shared.logger import JohnWickLogger
 from app.shared.metrics.metrics_collector import MetricsCollector
 from app.shared.retry.base import RetryPolicy
@@ -15,18 +15,22 @@ from app.shared.annotations.core import ApplicationScoped
 class RedisEventBus(EventBus):
     """
     Node.js EventEmitter-like interface over Redis Pub/Sub.
-    Accepts RedisClient from EventBusFactory for DI-friendly usage.
+    Directly manages Redis connections for Pub/Sub only.
     """
 
     def __init__(
         self,
-        redis_client: RedisClient,
+        redis_url: str = "redis://localhost:6379/0",
         logger: Optional[JohnWickLogger] = None,
         metrics: Optional[MetricsCollector] = None,
         retry_policy: Optional[RetryPolicy] = None,
     ):
         self.logger = logger or JohnWickLogger(name="RedisEventBus")
-        self.redis_client = redis_client
+        self.redis_url = redis_url
+
+        # Dedicated connections
+        self.publisher = None
+        self.subscriber = None
 
         self.subscribers: Dict[str, List[Callable[[dict], Awaitable[None]]]] = {}
         self._consume_tasks: Dict[str, asyncio.Task] = {}
@@ -41,7 +45,8 @@ class RedisEventBus(EventBus):
     async def start(self):
         async with self._start_lock:
             if not self._running:
-                await self.redis_client.connect()
+                self.publisher = aioredis.from_url(self.redis_url)
+                self.subscriber = aioredis.from_url(self.redis_url)
                 self._running = True
                 self.logger.info("RedisEventBus started")
 
@@ -49,20 +54,22 @@ class RedisEventBus(EventBus):
         if not self._running:
             return
 
-        # cancel subscriber callback tasks
         for tasks in self._subscriber_tasks.values():
             for task in tasks:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
         self._subscriber_tasks.clear()
 
-        # cancel consume loops
         for task in self._consume_tasks.values():
             task.cancel()
         await asyncio.gather(*self._consume_tasks.values(), return_exceptions=True)
         self._consume_tasks.clear()
 
-        await self.redis_client.close()
+        if self.publisher:
+            await self.publisher.close()
+        if self.subscriber:
+            await self.subscriber.close()
+
         self._running = False
         self.logger.info("RedisEventBus stopped")
 
@@ -71,25 +78,21 @@ class RedisEventBus(EventBus):
             await self.start()
 
     async def subscribe(self, channel: str, callback: Callable[[dict], Awaitable[None]]):
-        """Subscribe to a channel (auto-starts)."""
         await self._ensure_started()
-
         self.subscribers.setdefault(channel, []).append(callback)
 
         if channel not in self._consume_tasks:
             self._consume_tasks[channel] = asyncio.create_task(
                 self._consume_loop(channel)
             )
-
         self.logger.info("Subscription registered", extra={"channel": channel})
 
     async def publish(self, channel: str, payload: dict):
-        """Publish an event to Redis (auto-starts)."""
         await self._ensure_started()
 
         async def _publish():
             self.logger.info(f"Publishing message to redis:{channel}: {payload}")
-            await self.redis_client.redis.publish(channel, json.dumps(payload))
+            await self.publisher.publish(channel, json.dumps(payload))
 
         try:
             await self.retry_policy.execute(_publish)
@@ -102,13 +105,9 @@ class RedisEventBus(EventBus):
             raise
 
     async def _consume_loop(self, channel: str):
-        """
-        Consume messages from a Redis channel.
-        If the connection drops, automatically attempts to reconnect using retry_policy.
-        """
         while self._running:
             try:
-                pubsub = self.redis_client.redis.pubsub()
+                pubsub = self.subscriber.pubsub()
                 await pubsub.subscribe(channel)
                 self.logger.info("Subscribed", extra={"channel": channel})
 
@@ -150,16 +149,11 @@ class RedisEventBus(EventBus):
                     f"Consume loop error for channel={channel}, retrying...",
                     extra={"error": str(exc)},
                 )
-                # attempt reconnect with retry policy
-                async def _reconnect():
-                    await self.redis_client.connect()
-
                 try:
-                    await self.retry_policy.execute(_reconnect)
+                    await self.retry_policy.execute(lambda: self.subscriber.ping())
                 except Exception:
                     self.logger.error("Reconnect failed, stopping consumer")
                     break
-                # small backoff before retrying
                 await asyncio.sleep(1)
             finally:
                 try:

@@ -126,8 +126,7 @@ class EventBusFactory:
             from app.shared.messaging.transports.redis_bus import RedisEventBus
             redis_cfg = config.get("redis", {})
             redis_url = f"redis://{redis_cfg.get('host', '127.0.0.1')}:{int(redis_cfg.get('port', 6379))}/{int(redis_cfg.get('db', 0))}"
-            redis_client = RedisClient(redis_url=redis_url)
-            cls._event_bus = RedisEventBus(redis_client=redis_client, logger=logger, metrics=metrics)
+            cls._event_bus = RedisEventBus(redis_url=redis_url, logger=logger, metrics=metrics)
             logger.info(f"Created RedisEventBus instance with URL {redis_url}")
 
         elif transport == "kafka":
