@@ -114,6 +114,9 @@ class KafkaEventBus(EventBus):
 
         # Start the consume loop for this topic if not already running
         if topic not in self._consume_tasks or self._consume_tasks[topic].done():
+            # Each topic has its own _consume_loop running and within each, we will have a task for each callback
+            # think of it as a tree. i.e. if you have n topics, you'll have n _consume_loop tasks and if you have m subscribers
+            # per topic, you'll have m _subscriber_tasks. We keep track of all of them.
             self._consume_tasks[topic] = asyncio.create_task(self._consume_loop(topic))
             self.logger.info("Consume loop started for topic", extra={"topic": topic})
 
@@ -150,7 +153,9 @@ class KafkaEventBus(EventBus):
 
             tasks = set()
             # create a task for each callback for the message and schedule it
+            # the _subscribers maps a topic to callbacks i.e. a topic has an array of callbacks
             for cb in self._subscribers.get(topic, []):
+                # wrap it
                 async def _cb(cb=cb):
                     try:
                         # Inspect the callback signature
@@ -163,9 +168,11 @@ class KafkaEventBus(EventBus):
                             await cb(msg_topic, key, value)
                     except Exception:
                         self.logger.exception("Subscriber failed", extra={"topic": topic})
-
+                
                 task = asyncio.create_task(_cb())
                 tasks.add(task)
+                # a callback task is discarded as soon as it completes execution.
                 task.add_done_callback(lambda t: tasks.discard(t))
+                #subscribe_tasks has the tasks, they are shortlived, the _consume_loop tasks on the other hand live long.
             self._subscriber_tasks.setdefault(topic, set()).update(tasks)
 

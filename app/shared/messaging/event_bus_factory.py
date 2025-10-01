@@ -6,7 +6,7 @@ from typing import Dict, Any
 
 from app.shared.logger import JohnWickLogger
 from app.shared.metrics.metrics_collector import MetricsCollector
-from app.shared.clients import RedisClient, KafkaClient
+from app.shared.clients import KafkaClient
 from app.shared.annotations.core import ApplicationScoped
 from app.shared.registry import _CONSUMER_REGISTRY, _PRODUCER_REGISTRY, _SINGLETONS
 
