@@ -84,9 +84,8 @@ class RedisEventBus(EventBus):
         self.subscribers.setdefault(channel, []).append(callback)
 
         if channel not in self._consume_tasks:
-            self._consume_tasks[channel] = asyncio.create_task(
-                self._consume_loop(channel)
-            )
+            # the pattern of creating a task for a _consume_loop and a _consume_loop per channel
+            self._consume_tasks[channel] = asyncio.create_task(self._consume_loop(channel))
         self.logger.info("Subscription registered", extra={"channel": channel})
 
     async def publish(self, channel: str, payload: dict):
@@ -132,7 +131,7 @@ class RedisEventBus(EventBus):
                                 )
                                 if self.metrics:
                                     self.metrics.increment("failed_consume")
-
+                       # Again a task for each callback execution.
                         task = asyncio.create_task(self.retry_policy.execute(_cb))
                         tasks.add(task)
                         task.add_done_callback(lambda t: tasks.discard(t))

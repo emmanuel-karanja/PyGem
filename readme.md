@@ -193,3 +193,6 @@ This system reduces boilerplate for messaging-heavy applications while maintaini
 Next message arrives ──> repeat same async flow
 
 
+## Note on Concurrency
+
+In the event busses, we'll have as many _consume_loop tasks as the number of topcis and for each callback per topic, we'll spawn separate tasks to invoke the callbacks. The _consume_loop tasks are long lived and the _subscriber_tasks are shortlived i.e. the _subscriber_tasks last as long as it takes to invoke each callback fully and then, it's removed.
