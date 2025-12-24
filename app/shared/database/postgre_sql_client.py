@@ -76,6 +76,7 @@ class PostgresClient(DatabaseClient):
             self.logger.info("PostgreSQL connection pool stopped")
 
     # ------------------- Semaphore ------------------- #
+    # We need to maintain concurrency to the number of max_poolsize (max_concurrency)
     async def _acquire_semaphore(self):
         try:
             await asyncio.wait_for(self.semaphore.acquire(), timeout=self.semaphore_timeout)

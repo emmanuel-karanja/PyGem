@@ -2,7 +2,7 @@ from functools import lru_cache
 from app.shared.logger import JohnWickLogger
 from app.shared.clients import RedisClient, KafkaClient
 from app.shared.database import PostgresClient
-from app.shared.event_bus import KafkaEventBus, RedisEventBus
+from app.shared.messaging.transports import KafkaEventBus, RedisEventBus
 from app.shared.metrics.metrics_collector import MetricsCollector
 from app.config.settings import Settings
 from app.shared.retry import ExponentialBackoffRetry

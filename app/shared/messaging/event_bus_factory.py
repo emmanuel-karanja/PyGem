@@ -29,6 +29,9 @@ DEFAULTS = {
     },
 }
 
+# EventBusFactory does two things:
+# 1. Create an instance of the eventbus from the config(defaults to inmemory if configs not set)
+# 2. Wires up the producers and consumers.
 @ApplicationScoped
 class EventBusFactory:
     """Factory for creating and wiring EventBus instances."""
@@ -157,7 +160,7 @@ class EventBusFactory:
 
         logger.info("Bootstrapping producers and consumers...")
 
-        # --- Wire producers ---
+        # --- Wire producers ---create instances and set the eventbus instance.
         for producer_cls in _PRODUCER_REGISTRY:
             instance = _SINGLETONS.get(producer_cls)
             if not instance:
@@ -166,7 +169,9 @@ class EventBusFactory:
             instance.event_bus = event_bus
             logger.info(f"Bound producer {producer_cls.__name__} to EventBus")
 
-        # --- Wire consumers ---
+        # --- Wire consumers --- Get the topic, class name and the callback method
+        # and then try to create an instance of the class if it doesn't exist and then subscribe to the topic
+        # setting the callback to the method.
         for topic, cls_type, method_name in _CONSUMER_REGISTRY:
             if not cls_type:
                 logger.warning(f"Skipping consumer {method_name} — no class resolved")
