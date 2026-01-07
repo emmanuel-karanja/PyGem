@@ -5,7 +5,7 @@ from typing import Optional, List, AsyncIterator, Tuple
 from aiokafka import AIOKafkaProducer, AIOKafkaConsumer
 from aiokafka.admin import AIOKafkaAdminClient,NewTopic
 
-from app.shared.annotations.core import ApplicationScoped
+from app.shared.annotations import ApplicationScoped
 from app.shared.logger import JohnWickLogger
 from app.shared.metrics.metrics_collector import MetricsCollector
 from app.shared.retry.base import RetryPolicy

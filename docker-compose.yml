@@ -20,16 +20,16 @@ services:
   # Zookeeper
   # ----------------------------
   zookeeper:
-    image: bitnami/zookeeper:3.9.2
+    image: confluentinc/cp-zookeeper:7.4.0
     container_name: pygem_zookeeper
     environment:
-      ALLOW_ANONYMOUS_LOGIN: "yes"
-      ZOO_PORT_NUMBER: 2181
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
     ports:
       - "2181:2181"
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "echo", "ruok", "|", "nc", "localhost", "2181"]
+      test: ["CMD", "nc", "-z", "localhost", "2181"]
       interval: 5s
       retries: 10
       start_period: 5s
@@ -38,23 +38,21 @@ services:
   # Kafka
   # ----------------------------
   kafka:
-    image: bitnami/kafka:3.9.2
+    image: confluentinc/cp-kafka:7.4.0
     container_name: pygem_kafka
     depends_on:
       - zookeeper
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: pygem_zookeeper:2181
-      KAFKA_LISTENERS: PLAINTEXT://:9092
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true" 
-      ALLOW_PLAINTEXT_LISTENER: "yes"
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
     ports:
       - "9092:9092"
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "kafka-topics.sh", "--bootstrap-server", "localhost:9092", "--list"]
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9092", "--list"]
       interval: 10s
       retries: 12
       start_period: 10s

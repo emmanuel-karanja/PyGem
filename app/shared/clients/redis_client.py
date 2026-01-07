@@ -3,7 +3,7 @@ import json
 from typing import Any, Optional
 from redis.asyncio import Redis
 
-from app.shared.annotations.core import ApplicationScoped
+from app.shared.annotations import ApplicationScoped
 from app.shared.logger import JohnWickLogger
 from app.shared.metrics.metrics_collector import MetricsCollector
 from app.shared.metrics.metrics_schema import RedisMetrics
