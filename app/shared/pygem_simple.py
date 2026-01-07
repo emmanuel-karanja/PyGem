@@ -2,17 +2,17 @@
 Simple PyGem framework with lean CDI.
 """
 
-import logging
 from typing import Any, List, Type, Optional
 from app.shared.cdi import get_container, initialize_cdi
 from app.shared.annotations import register_consumers
+from app.shared.logger.john_wick_logger import create_logger
 
 
 class PyGem:
     """Simple PyGem framework."""
     
     def __init__(self, packages: Optional[List[str]] = None):
-        self.logger = logging.getLogger("PyGem")
+        self.logger = create_logger("PyGem")
         self.packages = packages or self._default_packages()
         self._initialized = False
     

@@ -151,11 +151,14 @@ class Bootstrap:
     
     def _configure_logging(self):
         """Configure application logging."""
-        import logging
+        from app.shared.logger.john_wick_logger import create_logger
         
-        # Set root logger level
-        level = getattr(logging, self.config.logging['level'].upper(), logging.INFO)
-        logging.getLogger().setLevel(level)
+        # Configure JohnWickLogger globally
+        global logger
+        logger = create_logger("Bootstrap")
+        logger.info("Bootstrap configured logging", 
+                   extra={"level": self.config.logging['level'], 
+                         "format": self.config.logging['format']})
         
         print(f"   Logging: {self.config.logging['level']} ({self.config.logging['format']})")
     
